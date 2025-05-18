@@ -8,19 +8,89 @@ import (
 	"syscall"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/bot"
+	"github.com/Raikerian/go-discord-chatgpt/internal/commands"
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
+	"github.com/diamondburned/arikawa/v3/discord" // Ensure discord package is imported for discord.AppID
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
 	"go.uber.org/fx"
-	"go.uber.org/fx/fxevent" // Added fxevent
+	"go.uber.org/fx/fxevent"
 	"go.uber.org/zap"
-
-	_ "github.com/Raikerian/go-discord-chatgpt/internal/commands" // Import for side effect of registering commands
 )
 
 // zapFxPrinter adapts a zap.SugaredLogger to fx.Printer interface
 type zapFxPrinter struct {
 	logger *zap.SugaredLogger
+}
+
+// LogEvent implements fxevent.Logger.
+func (p *zapFxPrinter) LogEvent(event fxevent.Event) {
+	switch e := event.(type) {
+	case *fxevent.OnStartExecuting:
+		p.logger.Debugf("HOOK OnStart executing: %s, function: %s", e.CallerName, e.FunctionName)
+	case *fxevent.OnStartExecuted:
+		if e.Err != nil {
+			p.logger.Errorf("HOOK OnStart failed: %s, function: %s, error: %v", e.CallerName, e.FunctionName, e.Err)
+		} else {
+			p.logger.Debugf("HOOK OnStart executed: %s, function: %s, runtime: %s", e.CallerName, e.FunctionName, e.Runtime)
+		}
+	case *fxevent.OnStopExecuting:
+		p.logger.Debugf("HOOK OnStop executing: %s, function: %s", e.CallerName, e.FunctionName)
+	case *fxevent.OnStopExecuted:
+		if e.Err != nil {
+			p.logger.Errorf("HOOK OnStop failed: %s, function: %s, error: %v", e.CallerName, e.FunctionName, e.Err)
+		} else {
+			p.logger.Debugf("HOOK OnStop executed: %s, function: %s, runtime: %s", e.CallerName, e.FunctionName, e.Runtime)
+		}
+	case *fxevent.Supplied:
+		if e.Err != nil {
+			p.logger.Errorf("SUPPLY failed: type: %s, error: %v", e.TypeName, e.Err)
+		} else {
+			p.logger.Debugf("SUPPLY: %s", e.TypeName)
+		}
+	case *fxevent.Provided:
+		if e.Err != nil {
+			p.logger.Errorf("PROVIDE failed: %v", e.Err)
+		} else {
+			p.logger.Debugf("PROVIDE: %s", e.OutputTypeNames)
+		}
+	case *fxevent.Invoking:
+		p.logger.Debugf("INVOKE: %s", e.FunctionName)
+	case *fxevent.Invoked:
+		if e.Err != nil {
+			p.logger.Errorf("INVOKE failed: %s, error: %v", e.FunctionName, e.Err)
+		} else {
+			p.logger.Debugf("INVOKE successful: %s", e.FunctionName)
+		}
+	case *fxevent.Stopping:
+		p.logger.Infof("STOPPING: %s", e.Signal)
+	case *fxevent.Stopped:
+		if e.Err != nil {
+			p.logger.Errorf("STOPPED with error: %v", e.Err)
+		} else {
+			p.logger.Info("STOPPED")
+		}
+	case *fxevent.RollingBack:
+		p.logger.Errorf("ROLLING BACK: %v", e.StartErr)
+	case *fxevent.RolledBack:
+		if e.Err != nil {
+			p.logger.Errorf("ROLLED BACK with error: %v", e.Err)
+		}
+	case *fxevent.Started:
+		if e.Err != nil {
+			p.logger.Errorf("STARTED with error: %v", e.Err)
+		} else {
+			p.logger.Info("STARTED")
+		}
+	case *fxevent.LoggerInitialized:
+		if e.Err != nil {
+			p.logger.Errorf("LOGGER INITIALIZED with error: %v", e.Err)
+		} else {
+			p.logger.Debugf("LOGGER INITIALIZED: %s", e.ConstructorName)
+		}
+	default:
+		p.logger.Debugf("UNKNOWN Fx event: %T", event)
+	}
 }
 
 // Printf implements fx.Printer
@@ -104,105 +174,135 @@ func NewSession(params NewSessionParameters) (NewSessionResult, error) { // Adde
 
 	params.LC.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
-			params.Logger.Info("Opening Discord session...") // Replaced log with params.Logger
-			// session.Open() now takes a context
-			if err := s.Open(ctx); err != nil {
-				params.Logger.Error("Failed to open discord session", zap.Error(err)) // Replaced log with params.Logger
-				return fmt.Errorf("failed to open discord session: %w", err)
-			}
-			params.Logger.Info("Discord session opened successfully.") // Replaced log with params.Logger
-			return nil
+			params.Logger.Info("Opening Discord session...")
+			// Add necessary intents. For slash commands, GuildMessages is often sufficient.
+			// Modify as needed based on other bot functionalities.
+			s.AddIntents(gateway.IntentGuilds | gateway.IntentGuildMessages | gateway.IntentGuildIntegrations)
+			// It is important to add handlers before opening the session.
+			// Handlers are added in NewBot, which should be fine as Fx resolves dependencies.
+			return s.Open(ctx)
 		},
 		OnStop: func(ctx context.Context) error {
-			params.Logger.Info("Closing Discord session...") // Replaced log with params.Logger
-			if err := s.Close(); err != nil {
-				params.Logger.Error("Error closing discord session", zap.Error(err)) // Replaced log with params.Logger
-				// It\'s often better to return the error to let Fx know shutdown didn\'t complete cleanly.
-				return fmt.Errorf("failed to close discord session: %w", err)
-			}
-			params.Logger.Info("Discord session closed successfully.") // Replaced log with params.Logger
-			return nil
+			params.Logger.Info("Closing Discord session...")
+			return s.Close() // Corrected: s.Close() does not take context
 		},
 	})
 
 	return NewSessionResult{Session: s}, nil
 }
 
-// BotLifecycleParameters holds dependencies for bot lifecycle management.
-type BotLifecycleParameters struct {
-	fx.In
-	LC     fx.Lifecycle
-	Bot    *bot.Bot
-	Logger *zap.Logger // Added Logger
+// provideDiscordAppID extracts the ApplicationID from the config and provides it as a discord.AppID.
+// It also logs the AppID being provided.
+func provideDiscordAppID(cfg *config.Config, logger *zap.Logger) (discord.AppID, error) {
+	if cfg.ApplicationID == nil || *cfg.ApplicationID == 0 {
+		logger.Error("Application ID is not configured or is invalid in config")
+		return 0, fmt.Errorf("application ID is not configured or is invalid")
+	}
+	appID := discord.AppID(*cfg.ApplicationID)
+	logger.Info("Providing Discord AppID", zap.Stringer("appID", appID))
+	return appID, nil
 }
 
-// registerBotLifecycle hooks the bot\'s Start and Stop methods into the Fx application lifecycle.
-func registerBotLifecycle(params BotLifecycleParameters) { // Added Logger to params
-	params.LC.Append(fx.Hook{
-		OnStart: func(ctx context.Context) error {
-			params.Logger.Info("Starting bot...")      // Replaced log with params.Logger
-			if err := params.Bot.Start(); err != nil { // Assumes Bot.Start() doesn\'t need context
-				params.Logger.Error("Failed to start bot", zap.Error(err)) // Replaced log with params.Logger
-				return fmt.Errorf("failed to start bot: %w", err)
-			}
-			params.Logger.Info("Bot started successfully.") // Replaced log with params.Logger
-			return nil
-		},
-		OnStop: func(ctx context.Context) error { // Assumes Bot.Stop() doesn\'t need context
-			params.Logger.Info("Stopping bot...") // Replaced log with params.Logger
-			if err := params.Bot.Stop(); err != nil {
-				params.Logger.Error("Error stopping bot", zap.Error(err)) // Replaced log with params.Logger
-				return fmt.Errorf("error stopping bot: %w", err)
-			}
-			params.Logger.Info("Bot stopped successfully.") // Replaced log with params.Logger
-			return nil
-		},
-	})
-}
+// Module exports Fx providers for the main application.
+var Module = fx.Options(
+	fx.Provide(
+		config.LoadConfig,          // Provide config loader
+		NewZapLogger,               // Provide Zap logger
+		NewSession,                 // Provide Discord session
+		provideDiscordAppID,        // Provide discord.AppID from config
+		commands.NewCommandManager, // Provide CommandManager
+		bot.NewBot,                 // Provide Bot
+
+		// Provide command implementations, tagged for the "commands" group
+		fx.Annotate(
+			commands.NewPingCommand,
+			fx.As(new(commands.Command)),
+			fx.ResultTags(`group:"commands"`),
+		),
+		fx.Annotate(
+			commands.NewVersionCommand,
+			fx.As(new(commands.Command)),
+			fx.ResultTags(`group:"commands"`),
+		),
+	),
+	fx.Invoke(func(lc fx.Lifecycle, b *bot.Bot, logger *zap.Logger, s *session.Session, cfg *config.Config) { // Updated Invoke
+		lc.Append(fx.Hook{
+			OnStart: func(ctx context.Context) error {
+				logger.Info("Executing OnStart hook: Starting bot and registering commands.")
+
+				// Ensure session is open before trying to register commands
+				// The session's OnStart (s.Open) should have completed due to Fx lifecycle order.
+
+				// Start the bot, which includes registering commands
+				if err := b.Start(ctx); err != nil {
+					logger.Error("Failed to start bot", zap.Error(err))
+					return err
+				}
+				logger.Info("Bot started successfully via Fx OnStart hook.")
+				return nil
+			},
+			OnStop: func(ctx context.Context) error {
+				logger.Info("Executing OnStop hook: Stopping bot and unregistering commands.")
+				if err := b.Stop(ctx); err != nil {
+					logger.Error("Failed to stop bot", zap.Error(err))
+					return err
+				}
+				logger.Info("Bot stopped successfully via Fx OnStop hook.")
+				return nil
+			},
+		})
+	}),
+	// Provide all command implementations. Fx will collect them if they are provided as commands.Command
+	// This requires each command to have a constructor that Fx can use.
+	// For now, commands are registered via init() in their respective files.
+	// If you want Fx to manage command instances, you'd change command registration.
+
+	// Example of how you might provide commands if they were Fx components:
+	// fx.Provide(fx.Annotate(commands.NewPingCommand, fx.As(new(commands.Command)))),
+	// fx.Provide(fx.Annotate(commands.NewVersionCommand, fx.As(new(commands.Command)))),
+)
 
 func main() {
+	// Set a default config path. This can be overridden by environment variables or flags if needed.
+	configPath := "../config.yaml"
+
 	app := fx.New(
-		fx.Supply("../config.yaml"), // Provide the config file path
-		fx.Provide(
-			config.LoadConfig, // Provide configuration loading function
-			NewZapLogger,      // Provide our Zap logger
-			NewSession,        // Provide Discord session factory
-			bot.NewBot,        // Provide Bot factory
-			// Provide fxevent.Logger using the existing *zap.Logger
-			func(log *zap.Logger) fxevent.Logger {
-				return &fxevent.ZapLogger{Logger: log}
-			},
-		),
-		fx.Invoke(registerBotLifecycle), // Invoke functions that need to run on start (e.g., register lifecycle hooks)
-		// Provide the zap logger to Fx itself
-		fx.WithLogger(func(logger *zap.Logger) fx.Printer {
-			return &zapFxPrinter{logger: logger.Sugar()} // Use the adapter
+		Module, // Use the defined module
+		// Provide the config path to the LoadConfig function.
+		// Fx will see that LoadConfig needs a string and this will be used.
+		fx.Supply(configPath),
+
+		// Configure Fx to use our Zap logger for its own internal logging.
+		// This makes Fx's logs consistent with the application's logs.
+		fx.WithLogger(func(logger *zap.Logger) fxevent.Logger {
+			// Adapt zap.Logger to fxevent.Logger. For Fx's own logs, a sugared logger is often convenient.
+			return &zapFxPrinter{logger: logger.Sugar()}
 		}),
 	)
 
-	// Start the application.
-	if err := app.Start(context.Background()); err != nil {
-		// Fx's own logger (now our Zap logger) should have logged details.
-		// This provides a clear message to stderr and exits.
-		fmt.Fprintf(os.Stderr, "Fx application failed to start: %v\\n", err)
-		os.Exit(1)
+	// Run the application. This will block until the application stops.
+	// Fx handles starting and stopping of components based on their lifecycle hooks.
+	app.Run()
+
+	// If app.Run() returns, it means the application is shutting down.
+	// We can log this event. Fx has already handled the shutdown of components.
+	// (Assuming a logger is accessible here, or rely on Fx's OnStop hooks for logging)
+
+	// Set up a channel to listen for OS signals (like Ctrl+C).
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	// Block until a signal is received.
+	select {
+	case s := <-sigCh:
+		// Log the received signal. (Requires logger access or handle in Fx OnStop)
+		fmt.Printf("Received signal: %s, initiating shutdown.\n", s)
+	case <-app.Done():
+		// The application shut down for another reason (e.g., an error in a lifecycle hook).
+		fmt.Println("Application shutdown initiated by Fx.")
 	}
 
-	// At this point, the application is running.
-	// The injected logger in `main`'s scope isn't directly available without further Fx constructs.
-	// We rely on Fx's logging or component-specific logging.
-
-	// Wait for a termination signal (CTRL-C or SIGTERM)
-	stopChan := make(chan os.Signal, 1)
-	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM)
-	<-stopChan // Block until a signal is received
-
-	// Stop the application.
-	if err := app.Stop(context.Background()); err != nil {
-		// Fx's own logger (now our Zap logger) should have logged details.
-		fmt.Fprintf(os.Stderr, "Fx application failed to stop gracefully: %v\\n", err)
-		os.Exit(1)
-	}
-
-	// The logger.Sync() for the main Zap logger is handled by its Fx lifecycle hook in NewZapLogger.
+	// The Fx app's Stop method has already been called by app.Run() when it exits.
+	// If you need to perform additional cleanup not managed by Fx, do it here.
+	fmt.Println("Application has shut down.")
 }

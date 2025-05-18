@@ -11,6 +11,12 @@ import (
 // PingCommand is a simple command that responds with "Pong!".
 type PingCommand struct{}
 
+// NewPingCommand creates a new PingCommand instance.
+// This constructor will be used by Fx.
+func NewPingCommand() Command {
+	return &PingCommand{}
+}
+
 // Name returns the name of the command.
 func (c *PingCommand) Name() string {
 	return "ping"
@@ -39,8 +45,4 @@ func (c *PingCommand) Execute(s *session.Session, e *gateway.InteractionCreateEv
 		return err
 	}
 	return nil
-}
-
-func init() {
-	RegisterCommand(&PingCommand{})
 }

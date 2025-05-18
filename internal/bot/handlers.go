@@ -12,8 +12,8 @@ import (
 	"go.uber.org/zap" // Added zap
 )
 
-// Updated handleInteraction to accept context and logger
-func handleInteraction(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, logger *zap.Logger) {
+// Updated handleInteraction to accept context, logger and command manager
+func handleInteraction(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, logger *zap.Logger, cmdManager *commands.CommandManager) {
 	// Check if it\'s a slash command
 	switch data := e.Data.(type) {
 	case *discord.CommandInteraction:
@@ -21,7 +21,7 @@ func handleInteraction(ctx context.Context, s *session.Session, e *gateway.Inter
 
 		// Get the command handler
 		// Assuming GetCommand is updated or CommandManager is used here if it now holds commands
-		cmd, ok := commands.GetCommand(data.Name) // This might need to change if commands are now managed via CommandManager instance
+		cmd, ok := cmdManager.GetCommand(data.Name) // Use CommandManager to get the command
 		if !ok {
 			logger.Warn("Unknown command", zap.String("commandName", data.Name)) // Replaced log
 			// Optionally send a response back to the user indicating the command is not found

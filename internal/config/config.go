@@ -9,8 +9,9 @@ import (
 
 // Config stores the application configuration.
 type Config struct {
-	Token         string             `yaml:"token"`
+	BotToken      string             `yaml:"bot_token"`
 	ApplicationID *discord.Snowflake `yaml:"application_id"`
+	GuildIDs      []string           `yaml:"guild_ids"`
 }
 
 // LoadConfig loads the configuration from the given file path.

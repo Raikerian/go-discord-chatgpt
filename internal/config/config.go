@@ -12,6 +12,7 @@ type Config struct {
 	BotToken      string             `yaml:"bot_token"`
 	ApplicationID *discord.Snowflake `yaml:"application_id"`
 	GuildIDs      []string           `yaml:"guild_ids"`
+	LogLevel      string             `yaml:"log_level"` // Added LogLevel field
 }
 
 // LoadConfig loads the configuration from the given file path.

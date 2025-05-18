@@ -1,48 +1,46 @@
 package commands
 
 import (
-	"log"
-
-	"github.com/diamondburned/arikawa/v3/api"
-	"github.com/diamondburned/arikawa/v3/discord"
+	"github.com/diamondburned/arikawa/v3/api"     // For InteractionResponse, InteractionResponseData
+	"github.com/diamondburned/arikawa/v3/discord" // For CommandInteraction, CommandOption
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
 	"github.com/diamondburned/arikawa/v3/utils/json/option"
 )
 
-// PingCommand is a simple ping command.
+// PingCommand is a simple command that responds with "Pong!".
 type PingCommand struct{}
 
-// Name returns the command's name.
+// Name returns the name of the command.
 func (c *PingCommand) Name() string {
 	return "ping"
 }
 
-// Description returns the command's description.
+// Description returns the description of the command.
 func (c *PingCommand) Description() string {
 	return "Responds with Pong!"
 }
 
-// CommandData builds the command data for Discord API.
-func (c *PingCommand) CommandData() api.CreateCommandData {
-	return api.CreateCommandData{
-		Name:        c.Name(),
-		Description: c.Description(),
-	}
+// Options returns the command options.
+// Corrected to return []discord.CommandOption to match the Command interface.
+func (c *PingCommand) Options() []discord.CommandOption {
+	return nil // No options for this command
 }
 
 // Execute runs the command.
-func (c *PingCommand) Execute(s *session.Session, e *gateway.InteractionCreateEvent, i *discord.CommandInteraction) error {
-	log.Printf("Executing ping command for interaction ID: %s", e.ID)
-	return s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
+func (c *PingCommand) Execute(s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error {
+	err := s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
 		Type: api.MessageInteractionWithSource,
 		Data: &api.InteractionResponseData{
 			Content: option.NewNullableString("Pong!"),
 		},
 	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
-// init registers the command when the package is initialized.
 func init() {
 	RegisterCommand(&PingCommand{})
 }

@@ -161,11 +161,6 @@ func registerBotLifecycle(params BotLifecycleParameters) { // Added Logger to pa
 }
 
 func main() {
-	// Temporary logger for initial Fx setup messages if needed, Fx will use its own default until ours is provided.
-	// initialLogger, _ := zap.NewDevelopment()
-	// initialLogger.Info("Initializing Fx application...")
-	// defer initialLogger.Sync() // Flushes any buffered log entries
-
 	app := fx.New(
 		fx.Supply("../config.yaml"), // Provide the config file path
 		fx.Provide(
@@ -196,15 +191,11 @@ func main() {
 	// At this point, the application is running.
 	// The injected logger in `main`'s scope isn't directly available without further Fx constructs.
 	// We rely on Fx's logging or component-specific logging.
-	// A simple stdout message can indicate the bot is ready if desired, but primary logging is through Zap.
-	// fmt.Println("Fx application started. Bot is running. Press CTRL-C to exit.")
 
 	// Wait for a termination signal (CTRL-C or SIGTERM)
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM)
 	<-stopChan // Block until a signal is received
-
-	// fmt.Println("Shutdown signal received. Stopping Fx application...") // Simple stdout message
 
 	// Stop the application.
 	if err := app.Stop(context.Background()); err != nil {
@@ -213,6 +204,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	// fmt.Println("Fx application has shut down successfully.") // Simple stdout message
 	// The logger.Sync() for the main Zap logger is handled by its Fx lifecycle hook in NewZapLogger.
 }

@@ -1,0 +1,87 @@
+# GitHub Copilot Instructions for go-discord-chatgpt
+
+This document provides instructions and context for GitHub Copilot to effectively assist with the development of the `go-discord-chatgpt` project.
+
+## Project Overview
+
+`go-discord-chatgpt` is a Discord bot written in Go. It uses the Arikawa library for Discord API interaction and Uber Fx for dependency injection and application lifecycle management. The primary goal is to provide slash command functionalities.
+
+## Key Technologies & Libraries
+
+*   **Go**: The primary programming language.
+*   **Arikawa (v3)**: Go library for the Discord API. Used for session management, event handling, and command registration.
+*   **Uber Fx**: Dependency injection framework. Manages the application's lifecycle and the creation and wiring of components (services, configuration, logger, etc.).
+*   **Zap**: Structured logging library. Used for all application logging, including Fx's internal logs.
+*   **YAML V3**: For parsing the `config.yaml` file.
+
+## Project Structure
+
+```
+.
+├── config.yaml             # Application configuration (bot token, app ID, guild IDs, log level)
+├── go.mod                  # Go module definition
+├── go.sum                  # Go module checksums
+├── README.md               # Project README
+├── cmd/
+│   └── main.go             # Main application entry point, Fx setup, and lifecycle management.
+├── internal/
+│   ├── bot/
+│   │   ├── bot.go          # Core bot service, handles startup/shutdown logic, interaction event routing.
+│   │   └── handlers.go     # Interaction event handlers (e.g., for slash commands).
+│   ├── commands/
+│   │   ├── command_loader.go # CommandManager: loads commands from Fx, registers/unregisters with Discord.
+│   │   ├── command.go      # Defines the `Command` interface that all slash commands must implement.
+│   │   ├── ping.go         # Implementation of the `/ping` command.
+│   │   └── version.go      # Implementation of the `/version` command.
+│   └── config/
+│       └── config.go       # Configuration struct and loading logic.
+└── pkg/                    # (Currently empty) Intended for reusable library code.
+```
+
+## Core Architectural Decisions & Patterns
+
+1.  **Dependency Injection with Uber Fx**:
+    *   The application's components (config, logger, Discord session, command manager, bot service, commands) are managed by Fx.
+    *   Providers for these components are defined in `cmd/main.go`.
+    *   Fx handles the lifecycle (start/stop) of these components. For example, the Discord session is opened on start and closed on stop, and commands are registered/unregistered accordingly.
+
+2.  **Configuration Management**:
+    *   Configuration is loaded from `config.yaml` into the `config.Config` struct (`internal/config/config.go`).
+    *   The path to `config.yaml` is supplied to Fx in `cmd/main.go`.
+    *   The `*config.Config` object is then available for injection into other components.
+
+3.  **Logging**:
+    *   Zap is used for structured logging.
+    *   A `*zap.Logger` is configured and provided by Fx.
+    *   Fx's internal logging is also adapted to use this Zap logger via the `zapFxPrinter` in `cmd/main.go`.
+
+4.  **Command Handling**:
+    *   **Interface**: All slash commands implement the `commands.Command` interface defined in `internal/commands/command.go`. This interface specifies methods like `Name()`, `Description()`, `Options()`, and `Execute()`.
+    *   **Constructors & Fx Groups**: Each command (e.g., `PingCommand`, `VersionCommand`) has a constructor function (e.g., `NewPingCommand() commands.Command`).
+    *   **Fx Provisioning**: These constructors are provided to Fx in `cmd/main.go` and tagged with `fx.ResultTags(\`group:"commands"\`)`.
+    *   **CommandManager**: The `commands.CommandManager` (`internal/commands/command_loader.go`) receives all `commands.Command` implementations from the "commands" Fx group.
+    *   **Registration**: On startup, `CommandManager.RegisterCommands()` iterates through the loaded commands and registers them with Discord (globally or for specific guilds listed in `config.yaml`). It unregisters them on shutdown.
+    *   **Dispatch**: The `Bot` service (`internal/bot/bot.go`) receives interaction create events from Arikawa. The `handleInteraction` function (`internal/bot/handlers.go`) uses the `CommandManager` to find the appropriate command handler based on the interaction data and then executes it.
+
+5.  **Discord Session**:
+    *   The Arikawa `*session.Session` is created and managed by Fx (`NewSession` in `cmd/main.go`).
+    *   Its lifecycle (Open/Close) is tied to Fx's OnStart/OnStop hooks.
+    *   Intents are configured within the `NewSession` provider.
+
+## Development Guidelines & Preferences
+
+*   **Modularity**: Keep components decoupled and use Fx for wiring them together.
+*   **Interfaces**: Use interfaces (like `commands.Command`) to define contracts between components.
+*   **Structured Logging**: Use Zap for all logging. Provide context with logs where possible.
+*   **Error Handling**: Handle errors explicitly. Fx's lifecycle management will also report errors during startup/shutdown.
+*   **Configuration-Driven**: Make behavior configurable via `config.yaml` where appropriate (e.g., guild IDs).
+*   **Testing**: (Future) Aim for unit tests for individual components and commands. Fx's structure should facilitate this by making it easier to mock dependencies.
+
+## Future Considerations (as of May 19, 2025)
+
+*   Adding more complex commands.
+*   Potentially integrating with a Chat GPT service.
+*   Expanding error handling and user feedback in Discord.
+*   Adding more robust testing.
+
+This document should help Copilot understand the project's design and assist in a way that aligns with these established patterns.

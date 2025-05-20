@@ -25,9 +25,6 @@ type MessagesCacheData struct {
 // NewMessagesCache creates a new MessagesCache with the given size.
 // The size parameter determines the maximum number of items the cache can hold.
 func NewMessagesCache(size int) (*MessagesCache, error) {
-	if size <= 0 {
-		// According to hashicorp/golang-lru docs, New() returns error if size is not positive.
-	}
 	lruCache, err := lru.New[string, *MessagesCacheData](size)
 	if err != nil {
 		return nil, err

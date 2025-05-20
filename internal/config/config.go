@@ -16,8 +16,9 @@ type DiscordConfig struct {
 
 // OpenAIConfig stores OpenAI specific configurations.
 type OpenAIConfig struct {
-	APIKey string   `yaml:"api_key"`
-	Models []string `yaml:"models"`
+	APIKey           string   `yaml:"api_key"`
+	Models           []string `yaml:"models"`
+	MessageCacheSize int      `yaml:"message_cache_size"` // Added field for message cache size
 }
 
 // Config stores the application configuration.

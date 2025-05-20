@@ -10,6 +10,7 @@ import (
 	"github.com/Raikerian/go-discord-chatgpt/internal/bot"
 	"github.com/Raikerian/go-discord-chatgpt/internal/commands"
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
+	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
 	"github.com/diamondburned/arikawa/v3/discord" // Ensure discord package is imported for discord.AppID
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
@@ -227,6 +228,15 @@ var Module = fx.Options(
 		commands.NewCommandManager, // Provide CommandManager
 		bot.NewBot,                 // Provide Bot
 		NewOpenAIClient,            // Provide OpenAI client
+
+		// Provider for the gpt.MessagesCache
+		func(cfg *config.Config) (*gpt.MessagesCache, error) { // Injected config.Config
+			cacheSize := cfg.OpenAI.MessageCacheSize
+			if cacheSize <= 0 {
+				cacheSize = 100 // Default to 100 if not specified or invalid
+			}
+			return gpt.NewMessagesCache(cacheSize)
+		},
 
 		// Provide command implementations, tagged for the "commands" group
 		fx.Annotate(

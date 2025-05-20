@@ -4,6 +4,7 @@ go 1.24.3
 
 require (
 	github.com/diamondburned/arikawa/v3 v3.5.0
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/sashabaranov/go-openai v1.40.0
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/fx v1.24.0

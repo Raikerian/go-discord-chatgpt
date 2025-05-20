@@ -4,30 +4,39 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings" // Added for message splitting
 
 	"github.com/diamondburned/arikawa/v3/api"
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
 	"github.com/diamondburned/arikawa/v3/utils/json/option"
+	"github.com/sashabaranov/go-openai" // Added for OpenAI client
 	"go.uber.org/zap"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
+	"github.com/Raikerian/go-discord-chatgpt/internal/gpt" // Added for message cache
 )
+
+const discordMaxMessageLength = 2000 // Define Discord's max message length
 
 // ChatCommand handles the /chat command logic.
 // It facilitates interaction with an AI model within a dedicated Discord thread.
 type ChatCommand struct {
-	logger *zap.Logger
-	cfg    *config.Config // Application configuration
+	logger        *zap.Logger
+	cfg           *config.Config     // Application configuration
+	openaiClient  *openai.Client     // OpenAI API client
+	messagesCache *gpt.MessagesCache // Cache for message history
 }
 
 // NewChatCommand creates a new ChatCommand.
-// It requires a logger for logging and config for accessing OpenAI models.
-func NewChatCommand(logger *zap.Logger, cfg *config.Config) Command {
+// It requires a logger, config, OpenAI client, and message cache.
+func NewChatCommand(logger *zap.Logger, cfg *config.Config, openaiClient *openai.Client, messagesCache *gpt.MessagesCache) Command {
 	return &ChatCommand{
-		logger: logger.Named("chat_command"),
-		cfg:    cfg,
+		logger:        logger.Named("chat_command"),
+		cfg:           cfg,
+		openaiClient:  openaiClient,
+		messagesCache: messagesCache,
 	}
 }
 
@@ -275,8 +284,133 @@ func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 		zap.String("parentMessageID", originalMessage.ID.String()),
 	)
 
+	// 9. Send initial prompt to OpenAI
+	c.logger.Info("Sending initial prompt to OpenAI",
+		zap.String("userPrompt", userPrompt),
+		zap.String("modelToUse", modelToUse),
+		zap.String("threadID", newThread.ID.String()),
+	)
+
+	// Indicate bot is thinking
+	if err := s.Client.Typing(newThread.ID); err != nil {
+		c.logger.Warn("Failed to trigger typing indicator in new thread", zap.Error(err), zap.String("threadID", newThread.ID.String()))
+	}
+
+	aiRequest := openai.ChatCompletionRequest{
+		Model: modelToUse,
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: userPrompt,
+			},
+		},
+		// TODO: Consider adding other parameters like Temperature, MaxTokens, etc., from config or user options
+	}
+
+	aiResponse, err := c.openaiClient.CreateChatCompletion(ctx, aiRequest)
+	if err != nil {
+		c.logger.Error("Failed to get response from OpenAI", zap.Error(err), zap.String("threadID", newThread.ID.String()))
+		// Try to send an error message to the thread
+		errMsgToThread := "Sorry, I encountered an error trying to reach the AI. Please try again later."
+		_, sendErr := s.Client.SendMessageComplex(newThread.ID, api.SendMessageData{Content: errMsgToThread})
+		if sendErr != nil {
+			c.logger.Error("Failed to send error message to thread after OpenAI failure", zap.Error(sendErr), zap.String("threadID", newThread.ID.String()))
+		}
+		return fmt.Errorf("failed to create chat completion: %w", err)
+	}
+
+	if len(aiResponse.Choices) == 0 || aiResponse.Choices[0].Message.Content == "" {
+		c.logger.Warn("OpenAI returned an empty response", zap.Any("aiResponse", aiResponse), zap.String("threadID", newThread.ID.String()))
+		// Try to send a message to the thread indicating no response
+		noRespMsgToThread := "The AI didn't provide a response this time. You might want to try rephrasing your message."
+		_, sendErr := s.Client.SendMessageComplex(newThread.ID, api.SendMessageData{Content: noRespMsgToThread})
+		if sendErr != nil {
+			c.logger.Error("Failed to send no-response message to thread", zap.Error(sendErr), zap.String("threadID", newThread.ID.String()))
+		}
+		return errors.New("openai returned empty response")
+	}
+
+	aiMessageContent := aiResponse.Choices[0].Message.Content
+	c.logger.Info("Received response from OpenAI",
+		zap.Int("promptTokens", aiResponse.Usage.PromptTokens),
+		zap.Int("completionTokens", aiResponse.Usage.CompletionTokens),
+		zap.Int("totalTokens", aiResponse.Usage.TotalTokens),
+		zap.String("threadID", newThread.ID.String()),
+	)
+
+	// 10. Post AI's first answer to the thread, splitting if necessary
+	if err := sendLongMessage(s, newThread.ID, aiMessageContent); err != nil {
+		c.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", newThread.ID.String()))
+		// The user has the thread, but the AI message failed to send. This is not ideal.
+		// We won't return an error to the interaction itself as the thread is created.
+	}
+
+	// Store the initial user prompt and AI response in the cache
+	// The thread ID can serve as a unique key for the conversation history.
+	if c.messagesCache != nil {
+		history := []openai.ChatCompletionMessage{
+			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
+			{Role: openai.ChatMessageRoleAssistant, Content: aiMessageContent},
+		}
+		// Wrap history in MessagesCacheData
+		cacheData := &gpt.MessagesCacheData{
+			Messages: history,
+			Model:    modelToUse, // Store the model used for this interaction
+			// SystemMessage, Temperature, TokenCount can be set if/when they are used
+		}
+		c.messagesCache.Add(newThread.ID.String(), cacheData)
+		c.logger.Debug("Stored initial messages in cache", zap.String("threadID", newThread.ID.String()))
+	}
+
 	// The initial response is already the first message in the thread.
 	// No further updates to the interaction response are needed on success.
 	c.logger.Info("Chat command execution completed successfully", zap.String("threadID", newThread.ID.String()))
+	return nil
+}
+
+// sendLongMessage sends a message to a Discord channel, splitting it into multiple messages
+// if it exceeds discordMaxMessageLength.
+func sendLongMessage(s *session.Session, channelID discord.ChannelID, content string) error {
+	if len(content) <= discordMaxMessageLength {
+		_, err := s.Client.SendMessageComplex(channelID, api.SendMessageData{Content: content})
+		return err
+	}
+
+	var parts []string
+	remainingContent := content
+	for len(remainingContent) > 0 {
+		if len(remainingContent) <= discordMaxMessageLength {
+			parts = append(parts, remainingContent)
+			break
+		}
+
+		// Find a good place to split (e.g., newline, space) to avoid breaking words/sentences awkwardly.
+		splitAt := discordMaxMessageLength
+		// Try to split at the last newline within the limit
+		lastNewline := strings.LastIndex(remainingContent[:splitAt], "\\n")
+		if lastNewline != -1 && lastNewline > 0 { // lastNewline > 0 to ensure we don't create empty messages if it starts with \\n
+			splitAt = lastNewline
+		} else {
+			// If no newline, try to split at the last space within the limit
+			lastSpace := strings.LastIndex(remainingContent[:splitAt], " ")
+			if lastSpace != -1 && lastSpace > 0 { // lastSpace > 0 to ensure we don't create empty messages
+				splitAt = lastSpace
+			}
+			// If no space or newline, we have to split mid-word (or the message is one giant word)
+		}
+
+		parts = append(parts, strings.TrimSpace(remainingContent[:splitAt]))
+		remainingContent = strings.TrimSpace(remainingContent[splitAt:])
+	}
+
+	for i, part := range parts {
+		if strings.TrimSpace(part) == "" { // Avoid sending empty messages
+			continue
+		}
+		_, err := s.Client.SendMessageComplex(channelID, api.SendMessageData{Content: part})
+		if err != nil {
+			return fmt.Errorf("failed to send message part %d/%d: %w", i+1, len(parts), err)
+		}
+	}
 	return nil
 }

@@ -4,7 +4,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 
 ## Project Overview
 
-`go-discord-chatgpt` is a Discord bot written in Go. It uses the Arikawa library for Discord API interaction, Uber Fx for dependency injection and application lifecycle management, and integrates with OpenAI's GPT models. The primary goal is to provide slash command functionalities, including interactions with ChatGPT.
+`go-discord-chatgpt` is a Discord bot written in Go. It uses the Arikawa library for Discord API interaction, Uber Fx for dependency injection and application lifecycle management, and integrates with OpenAI's GPT models. The primary goal is to provide slash command functionalities, including interactions with ChatGPT, such as the `/chat` command.
 
 ## Key Technologies & Libraries
 
@@ -22,7 +22,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 
 ```
 .
-├── config.yaml             # Application configuration (bot token, app ID, guild IDs, OpenAI key, models, cache size, log level)
+├── config.yaml             # Application configuration (bot token, app ID, guild IDs, OpenAI key, models, cache size, log level, interaction timeout)
 ├── go.mod                  # Go module definition
 ├── go.sum                  # Go module checksums
 ├── README.md               # Project README
@@ -34,6 +34,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 │   │   ├── bot.go          # Core bot service, handles startup/shutdown logic, interaction event routing.
 │   │   └── handlers.go     # Interaction event handlers (e.g., for slash commands).
 │   ├── commands/
+│   │   ├── chat.go         # Implementation of the `/chat` command with ChatGPT.
 │   │   ├── command_loader.go # CommandManager: loads commands from Fx, registers/unregisters with Discord.
 │   │   ├── command_loader_test.go # Unit tests for CommandManager.
 │   │   ├── command.go      # Defines the `Command` interface that all slash commands must implement.
@@ -50,15 +51,15 @@ This document provides instructions and context for GitHub Copilot to effectivel
 ## Core Architectural Decisions & Patterns
 
 1.  **Dependency Injection with Uber Fx**:
-    *   The application's components (config, logger, Discord session, OpenAI client, message cache, command manager, bot service, commands) are managed by Fx.
+    *   The application's components (config, logger, Discord session, OpenAI client, message cache, command manager, bot service, commands like [`ChatCommand`](internal/commands/chat.go)) are managed by Fx.
     *   Providers for these components are defined in `cmd/main.go`.
     *   Fx handles the lifecycle (start/stop) of these components. For example, the Discord session is opened on start and closed on stop, and commands are registered/unregistered accordingly.
 
 2.  **Configuration Management**:
     *   Configuration is loaded from `config.yaml` into the `config.Config` struct ([`internal/config/config.go`](internal/config/config.go)).
-    *   This includes Discord settings, OpenAI API key, model preferences, and message cache size.
+    *   This includes Discord settings (bot token, app ID, guild IDs, interaction timeout), OpenAI API key, model preferences, and message cache size.
     *   The path to `config.yaml` is supplied to Fx in [`cmd/main.go`](cmd/main.go).
-    *   The `*config.Config` object is then available for injection into other components.
+    *   The `*config.Config` object is then available for injection into other components. For example, `discord.interaction_timeout_seconds` is used by the [`Bot`](internal/bot/bot.go) service and `openai.message_cache_size` configures the [`gpt.MessagesCache`](internal/gpt/cache.go).
 
 3.  **Logging**:
     *   Zap is used for structured logging.
@@ -67,7 +68,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 
 4.  **Command Handling**:
     *   **Interface**: All slash commands implement the `commands.Command` interface defined in `internal/commands/command.go`. This interface specifies methods like `Name()`, `Description()`, `Options()`, and `Execute()`.
-    *   **Constructors & Fx Groups**: Each command (e.g., `PingCommand`, `VersionCommand`) has a constructor function (e.g., `NewPingCommand() commands.Command`).
+    *   **Constructors & Fx Groups**: Each command (e.g., [`PingCommand`](internal/commands/ping.go), [`VersionCommand`](internal/commands/version.go), [`ChatCommand`](internal/commands/chat.go)) has a constructor function (e.g., `NewPingCommand() commands.Command`).
     *   **Fx Provisioning**: These constructors are provided to Fx in `cmd/main.go` and tagged with `fx.ResultTags(\`group:"commands"\`)`.
     *   **CommandManager**: The [`commands.CommandManager`](internal/commands/command_loader.go) ([`internal/commands/command_loader.go`](internal/commands/command_loader.go)) receives all [`commands.Command`](internal/commands/command.go) implementations from the "commands" Fx group.
     *   **Registration**: On startup, [`CommandManager.RegisterCommands()`](internal/commands/command_loader.go) iterates through the loaded commands and registers them with Discord (globally or for specific guilds listed in `config.yaml`). It unregisters them on shutdown.
@@ -88,7 +89,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 7.  **OpenAI Integration & Caching**:
     *   **OpenAI Client**: An `*openai.Client` is created and managed by Fx ([`NewOpenAIClient`](cmd/main.go) in [`cmd/main.go`](cmd/main.go)), configured with the API key from `config.yaml`.
     *   **Message Cache**: A [`gpt.MessagesCache`](internal/gpt/cache.go) ([`internal/gpt/cache.go`](internal/gpt/cache.go)) using `hashicorp/golang-lru/v2` is provided by Fx. Its size is configurable via `config.yaml` (`openai.message_cache_size`).
-    *   These components are available for injection into commands or services that require interaction with the OpenAI API or its message history.
+    *   These components are available for injection into commands or services that require interaction with the OpenAI API or its message history, such as the [`ChatCommand`](internal/commands/chat.go).
 
 ## Development Guidelines & Preferences
 
@@ -96,7 +97,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 *   **Interfaces**: Use interfaces (like `commands.Command`) to define contracts between components.
 *   **Structured Logging**: Use Zap for all logging. Provide context with logs where possible.
 *   **Error Handling**: Handle errors explicitly. Fx's lifecycle management will also report errors during startup/shutdown.
-*   **Configuration-Driven**: Make behavior configurable via [`config.yaml`](config.yaml) where appropriate (e.g., guild IDs, OpenAI models, cache size).
+*   **Configuration-Driven**: Make behavior configurable via [`config.yaml`](config.yaml) where appropriate (e.g., guild IDs, OpenAI models, cache size, interaction timeouts).
 *   **Testing**:
     *   Write unit tests for individual components and commands, focusing on public interfaces.
     *   Utilize the `testify` suite for assertions.
@@ -104,11 +105,11 @@ This document provides instructions and context for GitHub Copilot to effectivel
     *   Ensure test files are named with the `_test.go` suffix and organized appropriately (e.g., in a `package <name>_test`).
     *   Fx's structure facilitates mocking dependencies when necessary.
 
-## Future Considerations (as of May 19, 2025)
+## Current Focus & Future Considerations
 
-*   Adding more complex commands, particularly those leveraging ChatGPT.
-*   Refining ChatGPT integration, including context management and prompt engineering.
-*   Expanding error handling and user feedback in Discord, especially for API interactions.
-*   Adding more robust testing, including integration tests for command flows involving OpenAI.
+*   **Enhancing ChatGPT Commands**: Building upon the existing [`/chat`](internal/commands/chat.go) command, further refining context management (e.g., using the [`MessagesCache`](internal/gpt/cache.go) more extensively for follow-up messages), prompt engineering capabilities, and exploring new GPT-powered features.
+*   **Improving User Experience**: Continuously expanding error handling, providing clearer user feedback in Discord, especially for API interactions (like OpenAI calls in [`ChatCommand`](internal/commands/chat.go)) and longer operations.
+*   **Comprehensive Testing**: Increasing test coverage, particularly with integration tests for command flows involving OpenAI and other external services. The [`ChatCommand`](internal/commands/chat.go) is a key candidate for such tests.
+*   **Configuration Flexibility**: Exploring more dynamic configuration options or in-Discord configuration commands.
 
 This document should help Copilot understand the project's design and assist in a way that aligns with these established patterns.

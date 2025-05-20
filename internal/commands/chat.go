@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings" // Added for message splitting
+	"time"
 
 	"github.com/diamondburned/arikawa/v3/api"
 	"github.com/diamondburned/arikawa/v3/discord"
@@ -18,7 +19,10 @@ import (
 	"github.com/Raikerian/go-discord-chatgpt/internal/gpt" // Added for message cache
 )
 
-const discordMaxMessageLength = 2000 // Define Discord's max message length
+const (
+	discordMaxMessageLength                  = 2000 // Define Discord's max message length
+	gptDiscordTypingIndicatorCooldownSeconds = 10
+)
 
 // ChatCommand handles the /chat command logic.
 // It facilitates interaction with an AI model within a dedicated Discord thread.
@@ -120,12 +124,6 @@ func makeThreadName(username, prompt string, maxLength int) string {
 }
 
 // Execute handles the execution of the /chat command.
-// 1. Parses user input (prompt and optional model).
-// 2. Validates input and configuration, sending ephemeral errors if needed.
-// 3. Sends an initial public interaction response with chat details; this message becomes the start of the thread.
-// 4. Fetches the message object of this initial response to get its ID and ChannelID.
-// 5. Creates a new Discord thread associated with the initial response message.
-// 6. If thread creation fails, attempts to edit the initial response to notify the user.
 func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error {
 	c.logger.Info("Chat command execution started",
 		zap.String("user", e.Member.User.Username),
@@ -291,10 +289,30 @@ func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 		zap.String("threadID", newThread.ID.String()),
 	)
 
-	// Indicate bot is thinking
-	if err := s.Client.Typing(newThread.ID); err != nil {
-		c.logger.Warn("Failed to trigger typing indicator in new thread", zap.Error(err), zap.String("threadID", newThread.ID.String()))
+	// Helper function to send typing indicator
+	sendTyping := func() {
+		if err := s.Client.Typing(newThread.ID); err != nil {
+			c.logger.Warn("Failed to trigger typing indicator in new thread", zap.Error(err), zap.String("threadID", newThread.ID.String()))
+		}
 	}
+
+	// Indicate bot is thinking immediately
+	sendTyping()
+
+	// Start a ticker for subsequent typing indicators
+	typingTicker := time.NewTicker(gptDiscordTypingIndicatorCooldownSeconds * time.Second)
+	done := make(chan bool)
+	go func() {
+		for {
+			select {
+			case <-typingTicker.C:
+				sendTyping() // Call the helper function
+			case <-done:
+				typingTicker.Stop()
+				return
+			}
+		}
+	}()
 
 	aiRequest := openai.ChatCompletionRequest{
 		Model: modelToUse,

@@ -21,7 +21,6 @@ type Bot struct {
 	Config     *config.Config
 	CmdManager *commands.CommandManager
 	Logger     *zap.Logger // Added Logger
-	// Add other necessary fields, like a command handler
 }
 
 // NewBotParameters holds dependencies for NewBot
@@ -60,24 +59,25 @@ func NewBot(params NewBotParameters) (*Bot, error) { // Updated signature
 		CmdManager: params.CmdManager, // Store the command manager
 	}
 
-	// Add handlers, such as for messages or slash commands
-	params.S.AddHandler(func(e *gateway.InteractionCreateEvent) {
-		// Pass the logger to the handler
-		handleInteraction(context.Background(), params.S, e, params.Logger, b.CmdManager) // Pass CmdManager
-	})
-
-	// Initialize the command manager
-	// Convert *discord.Snowflake to discord.AppID for NewCommandManager
-	// b.CmdManager = commands.NewCommandManager(params.S, discord.AppID(*params.Cfg.ApplicationID), params.Logger) // Corrected type conversion - This is now injected
-
-	params.Logger.Info("NewBot created successfully")
+	params.Logger.Info("NewBot created successfully, handler registration deferred to Start method")
 	return b, nil
 }
 
-// Start now focuses on bot-specific startup logic, like registering commands.
+// Start now focuses on bot-specific startup logic, like registering commands
+// and setting up event handlers with the correct application context.
 // Session opening is handled by Fx lifecycle.
 func (b *Bot) Start(ctx context.Context) error { // Added context parameter
-	b.Logger.Info("Executing bot-specific Start logic (e.g., registering commands)...") // Replaced log with b.Logger
+	b.Logger.Info("Bot.Start called, application context will be used directly by handlers.")
+
+	// Add event handlers now that ctx (the main application context) is available.
+	// The closure for handleInteraction will capture the ctx from this Start method.
+	b.Session.AddHandler(func(e *gateway.InteractionCreateEvent) {
+		// Pass the logger and other dependencies to the handler, using ctx directly.
+		handleInteraction(ctx, b.Session, e, b.Logger, b.CmdManager)
+	})
+	b.Logger.Info("InteractionCreateEvent handler added to session.")
+
+	b.Logger.Info("Executing bot-specific Start logic (e.g., registering commands)...")
 
 	// Register slash commands
 	// Ensure CmdManager is initialized

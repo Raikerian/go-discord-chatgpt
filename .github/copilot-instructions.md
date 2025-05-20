@@ -33,8 +33,11 @@ This document provides instructions and context for GitHub Copilot to effectivel
 │   ├── bot/
 │   │   ├── bot.go          # Core bot service, handles startup/shutdown logic, interaction event routing.
 │   │   └── handlers.go     # Interaction event handlers (e.g., for slash commands).
+│   ├── chat/               # NEW: Service for handling chat logic
+│   │   ├── service.go      # NEW: Core chat service implementation.
+│   │   └── util.go         # NEW: Utility functions for the chat service.
 │   ├── commands/
-│   │   ├── chat.go         # Implementation of the `/chat` command with ChatGPT.
+│   │   ├── chat.go         # Implementation of the `/chat` command, which delegates to the `chat.Service`.
 │   │   ├── command_loader.go # CommandManager: loads commands from Fx, registers/unregisters with Discord.
 │   │   ├── command_loader_test.go # Unit tests for CommandManager.
 │   │   ├── command.go      # Defines the `Command` interface that all slash commands must implement.
@@ -51,7 +54,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 ## Core Architectural Decisions & Patterns
 
 1.  **Dependency Injection with Uber Fx**:
-    *   The application's components (config, logger, Discord session, OpenAI client, message cache, command manager, bot service, commands like [`ChatCommand`](internal/commands/chat.go)) are managed by Fx.
+    *   The application's components (config, logger, Discord session, OpenAI client, message cache, **chat service ([`internal/chat/service.go`](internal/chat/service.go))**, command manager, bot service, commands like [`ChatCommand`](internal/commands/chat.go)) are managed by Fx.
     *   Providers for these components are defined in `cmd/main.go`.
     *   Fx handles the lifecycle (start/stop) of these components. For example, the Discord session is opened on start and closed on stop, and commands are registered/unregistered accordingly.
 
@@ -68,11 +71,11 @@ This document provides instructions and context for GitHub Copilot to effectivel
 
 4.  **Command Handling**:
     *   **Interface**: All slash commands implement the `commands.Command` interface defined in `internal/commands/command.go`. This interface specifies methods like `Name()`, `Description()`, `Options()`, and `Execute()`.
-    *   **Constructors & Fx Groups**: Each command (e.g., [`PingCommand`](internal/commands/ping.go), [`VersionCommand`](internal/commands/version.go), [`ChatCommand`](internal/commands/chat.go)) has a constructor function (e.g., `NewPingCommand() commands.Command`).
+    *   **Constructors & Fx Groups**: Each command (e.g., [`PingCommand`](internal/commands/ping.go), [`VersionCommand`](internal/commands/version.go), [`ChatCommand`](internal/commands/chat.go)) has a constructor function (e.g., `NewPingCommand() commands.Command`). The [`ChatCommand`](internal/commands/chat.go) now takes the [`chat.Service`](internal/chat/service.go) as a dependency.
     *   **Fx Provisioning**: These constructors are provided to Fx in `cmd/main.go` and tagged with `fx.ResultTags(\`group:"commands"\`)`.
     *   **CommandManager**: The [`commands.CommandManager`](internal/commands/command_loader.go) ([`internal/commands/command_loader.go`](internal/commands/command_loader.go)) receives all [`commands.Command`](internal/commands/command.go) implementations from the "commands" Fx group.
     *   **Registration**: On startup, [`CommandManager.RegisterCommands()`](internal/commands/command_loader.go) iterates through the loaded commands and registers them with Discord (globally or for specific guilds listed in `config.yaml`). It unregisters them on shutdown.
-    *   **Dispatch**: The [`Bot`](internal/bot/bot.go) service ([`internal/bot/bot.go`](internal/bot/bot.go)) receives interaction create events from Arikawa. The [`handleInteraction`](internal/bot/handlers.go) function ([`internal/bot/handlers.go`](internal/bot/handlers.go)) uses the [`CommandManager`](internal/commands/command_loader.go) to find the appropriate command handler based on the interaction data and then executes it.
+    *   **Dispatch**: The [`Bot`](internal/bot/bot.go) service ([`internal/bot/bot.go`](internal/bot/bot.go)) receives interaction create events from Arikawa. The [`handleInteraction`](internal/bot/handlers.go) function ([`internal/bot/handlers.go`](internal/bot/handlers.go)) uses the [`CommandManager`](internal/commands/command_loader.go) to find the appropriate command handler based on the interaction data and then executes it. The [`ChatCommand`](internal/commands/chat.go) delegates its core execution logic to the [`chat.Service`](internal/chat/service.go).
 
 5.  **Discord Session**:
     *   The Arikawa `*session.Session` is created and managed by Fx ([`NewSession`](cmd/main.go) in [`cmd/main.go`](cmd/main.go)).
@@ -89,7 +92,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 7.  **OpenAI Integration & Caching**:
     *   **OpenAI Client**: An `*openai.Client` is created and managed by Fx ([`NewOpenAIClient`](cmd/main.go) in [`cmd/main.go`](cmd/main.go)), configured with the API key from `config.yaml`.
     *   **Message Cache**: A [`gpt.MessagesCache`](internal/gpt/cache.go) ([`internal/gpt/cache.go`](internal/gpt/cache.go)) using `hashicorp/golang-lru/v2` is provided by Fx. Its size is configurable via `config.yaml` (`openai.message_cache_size`).
-    *   These components are available for injection into commands or services that require interaction with the OpenAI API or its message history, such as the [`ChatCommand`](internal/commands/chat.go).
+    *   These components are available for injection into services that require interaction with the OpenAI API or its message history, primarily the **[`chat.Service`](internal/chat/service.go)** (which is then used by commands like [`ChatCommand`](internal/commands/chat.go)).
 
 ## Development Guidelines & Preferences
 
@@ -107,9 +110,9 @@ This document provides instructions and context for GitHub Copilot to effectivel
 
 ## Current Focus & Future Considerations
 
-*   **Enhancing ChatGPT Commands**: Building upon the existing [`/chat`](internal/commands/chat.go) command, further refining context management (e.g., using the [`MessagesCache`](internal/gpt/cache.go) more extensively for follow-up messages), prompt engineering capabilities, and exploring new GPT-powered features.
-*   **Improving User Experience**: Continuously expanding error handling, providing clearer user feedback in Discord, especially for API interactions (like OpenAI calls in [`ChatCommand`](internal/commands/chat.go)) and longer operations.
-*   **Comprehensive Testing**: Increasing test coverage, particularly with integration tests for command flows involving OpenAI and other external services. The [`ChatCommand`](internal/commands/chat.go) is a key candidate for such tests.
+*   **Enhancing ChatGPT Commands**: Building upon the existing [`/chat`](internal/commands/chat.go) command and its underlying **[`chat.Service`](internal/chat/service.go)**, further refining context management (e.g., using the [`MessagesCache`](internal/gpt/cache.go) within the **[`chat.Service`](internal/chat/service.go)** more extensively for follow-up messages), prompt engineering capabilities, and exploring new GPT-powered features.
+*   **Improving User Experience**: Continuously expanding error handling, providing clearer user feedback in Discord, especially for API interactions (like OpenAI calls managed by the **[`chat.Service`](internal/chat/service.go)** for the [`ChatCommand`](internal/commands/chat.go)) and longer operations.
+*   **Comprehensive Testing**: Increasing test coverage, particularly with integration tests for command flows involving OpenAI and other external services. The [`ChatCommand`](internal/commands/chat.go) and particularly the **[`chat.Service`](internal/chat/service.go)** are key candidates for such tests.
 *   **Configuration Flexibility**: Exploring more dynamic configuration options or in-Discord configuration commands.
 
 This document should help Copilot understand the project's design and assist in a way that aligns with these established patterns.

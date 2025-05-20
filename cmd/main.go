@@ -8,13 +8,17 @@ import (
 	"syscall"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/bot"
+	"github.com/Raikerian/go-discord-chatgpt/internal/chat" // Import the new chat service
 	"github.com/Raikerian/go-discord-chatgpt/internal/commands"
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
+
 	"github.com/diamondburned/arikawa/v3/discord" // Ensure discord package is imported for discord.AppID
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
+
 	"github.com/sashabaranov/go-openai" // Added OpenAI client import
+
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 	"go.uber.org/zap"
@@ -218,27 +222,51 @@ func provideDiscordAppID(cfg *config.Config, logger *zap.Logger) (discord.AppID,
 	return appID, nil
 }
 
+// provideMessageCacheSize extracts the MessageCacheSize from the config and provides it as an int.
+func provideMessageCacheSize(cfg *config.Config, logger *zap.Logger) int {
+	size := cfg.OpenAI.MessageCacheSize
+	if size <= 0 {
+		logger.Warn("OpenAI MessageCacheSize is not configured or is invalid, defaulting to 100", zap.Int("configuredSize", size))
+		return 100 // Default to a sensible value if not configured or invalid
+	}
+	logger.Info("Providing OpenAI MessageCacheSize", zap.Int("size", size))
+	return size
+}
+
 // Module exports Fx providers for the main application.
 var Module = fx.Options(
 	fx.Provide(
-		config.LoadConfig,          // Provide config loader
-		NewZapLogger,               // Provide Zap logger
-		NewSession,                 // Provide Discord session
-		provideDiscordAppID,        // Provide discord.AppID from config
-		commands.NewCommandManager, // Provide CommandManager
-		bot.NewBot,                 // Provide Bot
-		NewOpenAIClient,            // Provide OpenAI client
+		// Configuration
+		config.LoadConfig, // Corrected to use LoadConfig
 
-		// Provider for the gpt.MessagesCache
-		func(cfg *config.Config) (*gpt.MessagesCache, error) { // Injected config.Config
-			cacheSize := cfg.OpenAI.MessageCacheSize
-			if cacheSize <= 0 {
-				cacheSize = 100 // Default to 100 if not specified or invalid
-			}
-			return gpt.NewMessagesCache(cacheSize)
-		},
+		// Logger
+		NewZapLogger,
 
-		// Provide command implementations, tagged for the "commands" group
+		// OpenAI Client
+		NewOpenAIClient,
+
+		// Message Cache Size (int)
+		provideMessageCacheSize, // Add this provider
+
+		// Message Cache
+		gpt.NewMessagesCache,
+
+		// Discord Session
+		NewSession,
+
+		// Discord AppID
+		provideDiscordAppID, // Add this provider
+
+		// Chat Service
+		chat.NewService, // Provide the new chat service
+
+		// Command Manager
+		commands.NewCommandManager,
+
+		// Bot Service
+		bot.NewBot,
+
+		// Commands (grouped)
 		fx.Annotate(
 			commands.NewPingCommand,
 			fx.As(new(commands.Command)),
@@ -250,7 +278,7 @@ var Module = fx.Options(
 			fx.ResultTags(`group:"commands"`),
 		),
 		fx.Annotate(
-			commands.NewChatCommand,
+			commands.NewChatCommand, // ChatCommand's constructor will now need chat.Service
 			fx.As(new(commands.Command)),
 			fx.ResultTags(`group:"commands"`),
 		),

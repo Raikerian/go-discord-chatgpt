@@ -301,13 +301,13 @@ func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 
 	// Start a ticker for subsequent typing indicators
 	typingTicker := time.NewTicker(gptDiscordTypingIndicatorCooldownSeconds * time.Second)
-	done := make(chan bool)
+	stopTypingIndicator := make(chan bool) // Renamed from 'done'
 	go func() {
 		for {
 			select {
 			case <-typingTicker.C:
 				sendTyping() // Call the helper function
-			case <-done:
+			case <-stopTypingIndicator: // Changed from 'done'
 				typingTicker.Stop()
 				return
 			}
@@ -328,6 +328,7 @@ func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 	aiResponse, err := c.openaiClient.CreateChatCompletion(ctx, aiRequest)
 	if err != nil {
 		c.logger.Error("Failed to get response from OpenAI", zap.Error(err), zap.String("threadID", newThread.ID.String()))
+		stopTypingIndicator <- true // Stop typing indicator on error
 		// Try to send an error message to the thread
 		errMsgToThread := "Sorry, I encountered an error trying to reach the AI. Please try again later."
 		_, sendErr := s.Client.SendMessageComplex(newThread.ID, api.SendMessageData{Content: errMsgToThread})
@@ -339,6 +340,7 @@ func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 
 	if len(aiResponse.Choices) == 0 || aiResponse.Choices[0].Message.Content == "" {
 		c.logger.Warn("OpenAI returned an empty response", zap.Any("aiResponse", aiResponse), zap.String("threadID", newThread.ID.String()))
+		stopTypingIndicator <- true // Stop typing indicator on empty response
 		// Try to send a message to the thread indicating no response
 		noRespMsgToThread := "The AI didn't provide a response this time. You might want to try rephrasing your message."
 		_, sendErr := s.Client.SendMessageComplex(newThread.ID, api.SendMessageData{Content: noRespMsgToThread})
@@ -355,6 +357,8 @@ func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 		zap.Int("totalTokens", aiResponse.Usage.TotalTokens),
 		zap.String("threadID", newThread.ID.String()),
 	)
+
+	stopTypingIndicator <- true // Signal to stop the typing indicator goroutine
 
 	// 10. Post AI's first answer to the thread, splitting if necessary
 	if err := sendLongMessage(s, newThread.ID, aiMessageContent); err != nil {

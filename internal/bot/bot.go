@@ -3,6 +3,7 @@ package bot
 import (
 	"context" // Added context
 	"fmt"
+	"time"
 
 	// "log" // Replaced with zap
 
@@ -29,13 +30,13 @@ type NewBotParameters struct {
 
 	Cfg        *config.Config
 	S          *session.Session
-	Logger     *zap.Logger              // Added Logger
-	CmdManager *commands.CommandManager // Added CommandManager
+	Logger     *zap.Logger
+	CmdManager *commands.CommandManager
 }
 
 // NewBot creates and initializes a new Bot.
 // The session and logger are now injected by Fx.
-func NewBot(params NewBotParameters) (*Bot, error) { // Updated signature
+func NewBot(params NewBotParameters) (*Bot, error) {
 	if params.S == nil {
 		return nil, fmt.Errorf("session provided to NewBot is nil")
 	}
@@ -45,7 +46,7 @@ func NewBot(params NewBotParameters) (*Bot, error) { // Updated signature
 	if params.Logger == nil {
 		return nil, fmt.Errorf("logger provided to NewBot is nil")
 	}
-	if params.CmdManager == nil { // Added check for CmdManager
+	if params.CmdManager == nil {
 		return nil, fmt.Errorf("command manager provided to NewBot is nil")
 	}
 	if params.Cfg.Discord.ApplicationID == nil || *params.Cfg.Discord.ApplicationID == 0 {
@@ -55,29 +56,44 @@ func NewBot(params NewBotParameters) (*Bot, error) { // Updated signature
 	b := &Bot{
 		Session:    params.S,
 		Config:     params.Cfg,
-		Logger:     params.Logger,     // Store the logger
-		CmdManager: params.CmdManager, // Store the command manager
+		Logger:     params.Logger,
+		CmdManager: params.CmdManager,
 	}
 
-	params.Logger.Info("NewBot created successfully, handler registration deferred to Start method")
+	// Handler registration is now moved to the Start method.
+	params.Logger.Info("NewBot created successfully. Handler registration will occur in Start.")
 	return b, nil
 }
 
 // Start now focuses on bot-specific startup logic, like registering commands
 // and setting up event handlers with the correct application context.
 // Session opening is handled by Fx lifecycle.
-func (b *Bot) Start(ctx context.Context) error { // Added context parameter
-	b.Logger.Info("Bot.Start called, application context will be used directly by handlers.")
+func (b *Bot) Start(ctx context.Context) error {
+	b.Logger.Info("Bot.Start called.")
 
-	// Add event handlers now that ctx (the main application context) is available.
-	// The closure for handleInteraction will capture the ctx from this Start method.
+	// Determine interaction timeout
+	// Default to 30 seconds if not specified or invalid in config
+	interactionTimeout := 30 * time.Second
+	if b.Config != nil && b.Config.Discord.InteractionTimeoutSeconds > 0 {
+		interactionTimeout = time.Duration(b.Config.Discord.InteractionTimeoutSeconds) * time.Second
+		b.Logger.Info("Using interaction timeout from config", zap.Duration("timeout", interactionTimeout))
+	} else {
+		b.Logger.Info("Using default interaction timeout", zap.Duration("timeout", interactionTimeout))
+	}
+
+	// Add event handlers now that the bot is "starting".
+	// The Fx application context (ctx) is for the Start method's lifecycle,
+	// not for individual interactions.
 	b.Session.AddHandler(func(e *gateway.InteractionCreateEvent) {
-		// Pass the logger and other dependencies to the handler, using ctx directly.
-		handleInteraction(ctx, b.Session, e, b.Logger, b.CmdManager)
+		// Create a new context with a timeout for each interaction.
+		interactionCtx, cancel := context.WithTimeout(context.Background(), interactionTimeout)
+		defer cancel()
+
+		handleInteraction(interactionCtx, b.Session, e, b.Logger, b.CmdManager)
 	})
 	b.Logger.Info("InteractionCreateEvent handler added to session.")
 
-	b.Logger.Info("Executing bot-specific Start logic (e.g., registering commands)...")
+	b.Logger.Info("Executing further bot-specific Start logic (e.g., registering commands)...")
 
 	// Register slash commands
 	// Ensure CmdManager is initialized
@@ -86,7 +102,6 @@ func (b *Bot) Start(ctx context.Context) error { // Added context parameter
 		return fmt.Errorf("command manager is not initialized in Bot")
 	}
 
-	// Convert string guild IDs from config to discord.GuildID
 	var guildIDs []discord.GuildID
 	if b.Config != nil && len(b.Config.Discord.GuildIDs) > 0 {
 		for _, idStr := range b.Config.Discord.GuildIDs {
@@ -107,7 +122,7 @@ func (b *Bot) Start(ctx context.Context) error { // Added context parameter
 	// Register slash commands on startup
 	b.CmdManager.RegisterCommands(guildIDs)
 
-	b.Logger.Info("Bot started and commands registered.")
+	b.Logger.Info("Bot started, event handler and commands registered.")
 
 	return nil
 }

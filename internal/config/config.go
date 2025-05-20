@@ -9,9 +9,10 @@ import (
 
 // DiscordConfig stores Discord specific configurations.
 type DiscordConfig struct {
-	BotToken      string             `yaml:"bot_token"`
-	ApplicationID *discord.Snowflake `yaml:"application_id"`
-	GuildIDs      []string           `yaml:"guild_ids"`
+	BotToken                  string             `yaml:"bot_token"`
+	ApplicationID             *discord.Snowflake `yaml:"application_id"`
+	GuildIDs                  []string           `yaml:"guild_ids"`
+	InteractionTimeoutSeconds int                `yaml:"interaction_timeout_seconds"` // Added field for interaction timeout
 }
 
 // OpenAIConfig stores OpenAI specific configurations.

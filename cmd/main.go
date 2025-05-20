@@ -13,6 +13,7 @@ import (
 	"github.com/diamondburned/arikawa/v3/discord" // Ensure discord package is imported for discord.AppID
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
+	"github.com/sashabaranov/go-openai" // Added OpenAI client import
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 	"go.uber.org/zap"
@@ -141,6 +142,19 @@ func NewZapLogger(params NewZapLoggerParameters) (*zap.Logger, error) {
 	return logger, nil
 }
 
+// NewOpenAIClient creates and configures a new OpenAI client.
+func NewOpenAIClient(cfg *config.Config, logger *zap.Logger) (*openai.Client, error) {
+	if cfg.OpenAI.APIKey == "" {
+		// It's better to return an error if the API key is missing,
+		// allowing Fx to handle the startup failure gracefully.
+		logger.Error("OpenAI API key is not configured in config.yaml")
+		return nil, fmt.Errorf("OpenAI API key (config.OpenAI.APIKey) is not configured")
+	}
+	client := openai.NewClient(cfg.OpenAI.APIKey)
+	logger.Info("OpenAI client created successfully.")
+	return client, nil
+}
+
 // NewSessionParameters holds dependencies for NewSession
 type NewSessionParameters struct {
 	fx.In
@@ -212,6 +226,7 @@ var Module = fx.Options(
 		provideDiscordAppID,        // Provide discord.AppID from config
 		commands.NewCommandManager, // Provide CommandManager
 		bot.NewBot,                 // Provide Bot
+		NewOpenAIClient,            // Provide OpenAI client
 
 		// Provide command implementations, tagged for the "commands" group
 		fx.Annotate(

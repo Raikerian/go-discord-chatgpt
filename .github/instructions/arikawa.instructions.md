@@ -1,5 +1,5 @@
 ---
-applyTo: '**'
+description: "Arikawa Discord API Library Instructions"
 ---
 # GitHub Copilot Prompt: Using the Arikawa Discord API Library
 

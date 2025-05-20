@@ -41,7 +41,7 @@ func handleInteraction(ctx context.Context, s *session.Session, e *gateway.Inter
 		// Pass context and logger to the command execution if the interface supports it.
 		// For now, assuming Execute does not take context/logger, but ideally it would.
 		// If CommandExecute needs logger, it should be part of the Command interface and struct.
-		err := cmd.Execute(s, e, data) // This would ideally be cmd.Execute(ctx, s, e, data, logger)
+		err := cmd.Execute(ctx, s, e, data) // This would ideally be cmd.Execute(ctx, s, e, data, logger)
 		if err != nil {
 			logger.Error("Error executing command", zap.String("commandName", data.Name), zap.Error(err)) // Replaced log
 			// Optionally send an error response back to the user

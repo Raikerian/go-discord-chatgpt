@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/diamondburned/arikawa/v3/api"
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
@@ -36,7 +38,7 @@ func (c *VersionCommand) Options() []discord.CommandOption {
 }
 
 // Execute runs the command.
-func (c *VersionCommand) Execute(s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error {
+func (c *VersionCommand) Execute(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error {
 	return s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
 		Type: api.MessageInteractionWithSource,
 		Data: &api.InteractionResponseData{

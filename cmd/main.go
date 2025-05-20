@@ -249,6 +249,11 @@ var Module = fx.Options(
 			fx.As(new(commands.Command)),
 			fx.ResultTags(`group:"commands"`),
 		),
+		fx.Annotate(
+			commands.NewChatCommand,
+			fx.As(new(commands.Command)),
+			fx.ResultTags(`group:"commands"`),
+		),
 	),
 	fx.Invoke(func(lc fx.Lifecycle, b *bot.Bot, logger *zap.Logger, s *session.Session, cfg *config.Config) { // Updated Invoke
 		lc.Append(fx.Hook{

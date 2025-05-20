@@ -5,6 +5,8 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
@@ -83,16 +85,16 @@ func (_c *MockCommand_Description_Call) RunAndReturn(run func() string) *MockCom
 }
 
 // Execute provides a mock function for the type MockCommand
-func (_mock *MockCommand) Execute(s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error {
-	ret := _mock.Called(s, e, data)
+func (_mock *MockCommand) Execute(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error {
+	ret := _mock.Called(ctx, s, e, data)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Execute")
 	}
 
 	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(*session.Session, *gateway.InteractionCreateEvent, *discord.CommandInteraction) error); ok {
-		r0 = returnFunc(s, e, data)
+	if returnFunc, ok := ret.Get(0).(func(context.Context, *session.Session, *gateway.InteractionCreateEvent, *discord.CommandInteraction) error); ok {
+		r0 = returnFunc(ctx, s, e, data)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -105,16 +107,17 @@ type MockCommand_Execute_Call struct {
 }
 
 // Execute is a helper method to define mock.On call
+//   - ctx
 //   - s
 //   - e
 //   - data
-func (_e *MockCommand_Expecter) Execute(s interface{}, e interface{}, data interface{}) *MockCommand_Execute_Call {
-	return &MockCommand_Execute_Call{Call: _e.mock.On("Execute", s, e, data)}
+func (_e *MockCommand_Expecter) Execute(ctx interface{}, s interface{}, e interface{}, data interface{}) *MockCommand_Execute_Call {
+	return &MockCommand_Execute_Call{Call: _e.mock.On("Execute", ctx, s, e, data)}
 }
 
-func (_c *MockCommand_Execute_Call) Run(run func(s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction)) *MockCommand_Execute_Call {
+func (_c *MockCommand_Execute_Call) Run(run func(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction)) *MockCommand_Execute_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*session.Session), args[1].(*gateway.InteractionCreateEvent), args[2].(*discord.CommandInteraction))
+		run(args[0].(context.Context), args[1].(*session.Session), args[2].(*gateway.InteractionCreateEvent), args[3].(*discord.CommandInteraction))
 	})
 	return _c
 }
@@ -124,7 +127,7 @@ func (_c *MockCommand_Execute_Call) Return(err error) *MockCommand_Execute_Call 
 	return _c
 }
 
-func (_c *MockCommand_Execute_Call) RunAndReturn(run func(s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error) *MockCommand_Execute_Call {
+func (_c *MockCommand_Execute_Call) RunAndReturn(run func(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error) *MockCommand_Execute_Call {
 	_c.Call.Return(run)
 	return _c
 }

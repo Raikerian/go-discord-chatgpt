@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"context"
+
 	"github.com/diamondburned/arikawa/v3/api"     // For InteractionResponse, InteractionResponseData
 	"github.com/diamondburned/arikawa/v3/discord" // For CommandInteraction, CommandOption
 	"github.com/diamondburned/arikawa/v3/gateway"
@@ -34,7 +36,7 @@ func (c *PingCommand) Options() []discord.CommandOption {
 }
 
 // Execute runs the command.
-func (c *PingCommand) Execute(s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error {
+func (c *PingCommand) Execute(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error {
 	err := s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
 		Type: api.MessageInteractionWithSource,
 		Data: &api.InteractionResponseData{

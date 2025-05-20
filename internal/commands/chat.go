@@ -10,6 +10,7 @@ import (
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
 	"github.com/diamondburned/arikawa/v3/utils/json/option"
+
 	"go.uber.org/zap"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/chat" // Import the new chat service package

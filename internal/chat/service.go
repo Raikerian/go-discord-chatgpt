@@ -50,44 +50,19 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 		zap.String("modelOption", modelOption),
 	)
 
-	// 1. Validate prompt (already done by caller, but good for service boundary)
 	if userPrompt == "" {
 		s.logger.Warn("User prompt is empty in service layer")
-		// Error already handled by caller with ephemeral message
-		return errors.New("prompt is empty")
+		return errors.New("prompt is empty") // Error already handled by caller
 	}
 
-	// 2. Validate model configuration and determine model to use
-	var modelToUse string
-	if len(s.cfg.OpenAI.Models) == 0 {
-		s.logger.Error("No OpenAI models configured")
-		// Error already handled by caller with ephemeral message
-		return errors.New("no OpenAI models configured")
-	}
-
-	if modelOption != "" {
-		isValidModel := false
-		for _, configuredModel := range s.cfg.OpenAI.Models {
-			if modelOption == configuredModel {
-				modelToUse = modelOption
-				isValidModel = true
-				break
-			}
-		}
-		if !isValidModel {
-			s.logger.Warn("User specified an invalid model, defaulting.",
-				zap.String("specifiedModel", modelOption),
-				zap.Strings("availableModels", s.cfg.OpenAI.Models),
-			)
-			modelToUse = s.cfg.OpenAI.Models[0] // Default to the first configured model
-		}
-	} else {
-		modelToUse = s.cfg.OpenAI.Models[0] // Default to the first configured model
+	modelToUse, err := s.determineModel(modelOption)
+	if err != nil {
+		s.logger.Error("Failed to determine model", zap.Error(err))
+		// Error already handled by caller
+		return err
 	}
 	s.logger.Info("Determined model for chat", zap.String("modelToUse", modelToUse))
 
-	// 3. Prepare thread name and initial message content
-	threadName := MakeThreadName(e.Member.User.Username, userPrompt, 100)
 	summaryMessage := fmt.Sprintf(
 		"Starting new chat session with %s!\n**User:** %s\n**Prompt:** %s\n**Model:** %s\n\nFuture messages in this thread will continue the conversation.",
 		e.Member.User.Username,
@@ -96,7 +71,79 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 		modelToUse,
 	)
 
-	// 4. Send the initial interaction response (this will be the first message in the thread)
+	originalMessage, err := s.sendInitialInteractionResponse(ses, e, summaryMessage)
+	if err != nil {
+		return err // Error already logged and handled in the helper
+	}
+	s.logger.Info("Initial interaction response sent and fetched",
+		zap.String("messageID", originalMessage.ID.String()),
+		zap.String("channelID", originalMessage.ChannelID.String()),
+	)
+
+	threadName := MakeThreadName(e.Member.User.Username, userPrompt, 100)
+	newThread, err := s.createThread(ses, e, originalMessage, threadName, summaryMessage)
+	if err != nil {
+		return err // Error already logged and handled in the helper
+	}
+	s.logger.Info("Thread created successfully",
+		zap.String("threadID", newThread.ID.String()),
+		zap.String("threadName", newThread.Name),
+	)
+
+	stopTypingIndicator := s.manageTypingIndicator(ses, newThread.ID)
+	defer func() { stopTypingIndicator <- true }()
+
+	aiMessageContent, err := s.getOpenAIResponse(ctx, userPrompt, modelToUse, newThread.ID)
+	if err != nil {
+		// Error logged in helper, send error message to thread
+		errMsgToThread := "Sorry, I encountered an error trying to reach the AI. Please try again later."
+		if _, sendErr := ses.SendMessageComplex(newThread.ID, api.SendMessageData{Content: errMsgToThread}); sendErr != nil {
+			s.logger.Error("Failed to send error message to thread after OpenAI failure", zap.Error(sendErr), zap.String("threadID", newThread.ID.String()))
+		}
+		return err
+	}
+
+	// Attempt to post AI response to the thread.
+	// The postAIResponseToThread helper function logs any errors that occur.
+	// This error is intentionally not returned to the caller of HandleChatInteraction
+	// because the primary interaction (thread creation) was successful,
+	// and the user already has access to the thread.
+	// _ = s.postAIResponseToThread(ses, newThread.ID, aiMessageContent)
+	if err := SendLongMessage(ses, newThread.ID, aiMessageContent); err != nil {
+		s.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", newThread.ID.String()))
+		// Note: This error means the AI's message didn't make it to the thread,
+		// even if the thread itself was successfully created. We don't return this error
+		// to the main interaction handler as the thread itself is usable.
+	}
+
+	s.storeMessagesInCache(newThread.ID.String(), userPrompt, aiMessageContent, modelToUse)
+
+	s.logger.Info("Chat interaction processing completed successfully", zap.String("threadID", newThread.ID.String()))
+	return nil
+}
+
+// determineModel validates model configuration and selects the model to use.
+func (s *Service) determineModel(modelOption string) (string, error) {
+	if len(s.cfg.OpenAI.Models) == 0 {
+		return "", errors.New("no OpenAI models configured")
+	}
+
+	if modelOption != "" {
+		for _, configuredModel := range s.cfg.OpenAI.Models {
+			if modelOption == configuredModel {
+				return modelOption, nil
+			}
+		}
+		s.logger.Warn("User specified an invalid model, defaulting.",
+			zap.String("specifiedModel", modelOption),
+			zap.Strings("availableModels", s.cfg.OpenAI.Models),
+		)
+	}
+	return s.cfg.OpenAI.Models[0], nil // Default to the first configured model
+}
+
+// sendInitialInteractionResponse sends the first response to the interaction.
+func (s *Service) sendInitialInteractionResponse(ses *session.Session, e *gateway.InteractionCreateEvent, summaryMessage string) (*discord.Message, error) {
 	initialResponseData := api.InteractionResponseData{
 		Content: option.NewNullableString(summaryMessage),
 	}
@@ -107,7 +154,6 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 
 	if err := ses.RespondInteraction(e.ID, e.Token, initialResponse); err != nil {
 		s.logger.Error("Failed to send initial interaction response", zap.Error(err))
-		// Attempt to send an ephemeral follow-up if the main response failed
 		errMsg := "Sorry, I couldn't start the chat. Please try again."
 		_, followUpErr := ses.FollowUpInteraction(e.AppID, e.Token, api.InteractionResponseData{
 			Content: option.NewNullableString(errMsg),
@@ -116,24 +162,22 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 		if followUpErr != nil {
 			s.logger.Error("Failed to send error follow-up for initial response failure", zap.Error(followUpErr))
 		}
-		return fmt.Errorf("failed to send initial interaction response: %w", err)
+		return nil, fmt.Errorf("failed to send initial interaction response: %w", err)
 	}
 
-	// 5. Fetch the original interaction response message we just sent.
 	originalMessage, err := ses.InteractionResponse(e.AppID, e.Token)
 	if err != nil {
 		s.logger.Error("Failed to get the initial interaction response message", zap.Error(err))
-		return fmt.Errorf("failed to get interaction response message: %w", err)
+		return nil, fmt.Errorf("failed to get interaction response message: %w", err)
 	}
-	s.logger.Info("Initial interaction response sent and fetched",
-		zap.String("messageID", originalMessage.ID.String()),
-		zap.String("channelID", originalMessage.ChannelID.String()),
-	)
+	return originalMessage, nil
+}
 
-	// 6. Prepare thread creation data
+// createThread creates a new thread from the original interaction response.
+func (s *Service) createThread(ses *session.Session, e *gateway.InteractionCreateEvent, originalMessage *discord.Message, threadName, summaryMessage string) (*discord.Channel, error) {
 	threadCreateAPIData := api.StartThreadData{
 		Name:                threadName,
-		AutoArchiveDuration: discord.ArchiveDuration(60),
+		AutoArchiveDuration: discord.ArchiveDuration(60), // TODO: Make configurable?
 	}
 
 	s.logger.Info("Attempting to create thread from message",
@@ -142,7 +186,6 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 		zap.String("channelID", originalMessage.ChannelID.String()),
 	)
 
-	// 7. Start the thread from the message
 	newThread, err := ses.StartThreadWithMessage(originalMessage.ChannelID, originalMessage.ID, threadCreateAPIData)
 	if err != nil {
 		s.logger.Error("Failed to create thread from message", zap.Error(err))
@@ -153,38 +196,26 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 		if editErr != nil {
 			s.logger.Error("Failed to edit interaction response to indicate thread creation failure", zap.Error(editErr))
 		}
-		return fmt.Errorf("failed to create thread from message: %w", err)
+		return nil, fmt.Errorf("failed to create thread from message: %w", err)
 	}
+	return newThread, nil
+}
 
-	s.logger.Info("Thread created successfully from message",
-		zap.String("threadID", newThread.ID.String()),
-		zap.String("threadName", newThread.Name),
-		zap.String("parentMessageID", originalMessage.ID.String()),
-	)
-
-	// 8. Send initial prompt to OpenAI
-	s.logger.Info("Sending initial prompt to OpenAI",
-		zap.String("userPrompt", userPrompt),
-		zap.String("modelToUse", modelToUse),
-		zap.String("threadID", newThread.ID.String()),
-	)
-
-	// Helper function to send typing indicator
+// manageTypingIndicator sends typing indicators periodically and returns a channel to stop it.
+func (s *Service) manageTypingIndicator(ses *session.Session, threadID discord.ChannelID) chan<- bool {
 	sendTyping := func() {
-		if err := ses.Typing(newThread.ID); err != nil {
-			s.logger.Warn("Failed to send typing indicator", zap.Error(err), zap.String("threadID", newThread.ID.String()))
+		if err := ses.Typing(threadID); err != nil {
+			s.logger.Warn("Failed to send typing indicator", zap.Error(err), zap.String("threadID", threadID.String()))
 		}
 	}
 
-	// Indicate bot is thinking immediately
-	sendTyping()
+	sendTyping() // Indicate bot is thinking immediately
 
-	// Start a ticker for subsequent typing indicators
 	typingTicker := time.NewTicker(gptDiscordTypingIndicatorCooldownSeconds * time.Second)
-	defer typingTicker.Stop()
-	stopTypingIndicator := make(chan bool, 1) // Buffered channel to prevent goroutine leak
+	stopTypingIndicator := make(chan bool, 1)
 
 	go func() {
+		defer typingTicker.Stop()
 		for {
 			select {
 			case <-typingTicker.C:
@@ -194,6 +225,16 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 			}
 		}
 	}()
+	return stopTypingIndicator
+}
+
+// getOpenAIResponse sends the prompt to OpenAI and returns the AI's message content.
+func (s *Service) getOpenAIResponse(ctx context.Context, userPrompt, modelToUse string, threadID discord.ChannelID) (string, error) {
+	s.logger.Info("Sending prompt to OpenAI",
+		zap.String("userPrompt", userPrompt),
+		zap.String("modelToUse", modelToUse),
+		zap.String("threadID", threadID.String()),
+	)
 
 	aiRequest := openai.ChatCompletionRequest{
 		Model: modelToUse,
@@ -207,23 +248,13 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 
 	aiResponse, err := s.openaiClient.CreateChatCompletion(ctx, aiRequest)
 	if err != nil {
-		s.logger.Error("Failed to get response from OpenAI", zap.Error(err), zap.String("threadID", newThread.ID.String()))
-		stopTypingIndicator <- true
-		errMsgToThread := "Sorry, I encountered an error trying to reach the AI. Please try again later."
-		if _, sendErr := ses.SendMessageComplex(newThread.ID, api.SendMessageData{Content: errMsgToThread}); sendErr != nil {
-			s.logger.Error("Failed to send error message to thread after OpenAI failure", zap.Error(sendErr), zap.String("threadID", newThread.ID.String()))
-		}
-		return fmt.Errorf("failed to create chat completion: %w", err)
+		s.logger.Error("Failed to get response from OpenAI", zap.Error(err), zap.String("threadID", threadID.String()))
+		return "", fmt.Errorf("failed to create chat completion: %w", err)
 	}
 
 	if len(aiResponse.Choices) == 0 || aiResponse.Choices[0].Message.Content == "" {
-		s.logger.Warn("OpenAI returned an empty response", zap.Any("aiResponse", aiResponse), zap.String("threadID", newThread.ID.String()))
-		stopTypingIndicator <- true
-		noRespMsgToThread := "The AI didn't provide a response this time. You might want to try rephrasing your message."
-		if _, sendErr := ses.SendMessageComplex(newThread.ID, api.SendMessageData{Content: noRespMsgToThread}); sendErr != nil {
-			s.logger.Error("Failed to send empty AI response message to thread", zap.Error(sendErr), zap.String("threadID", newThread.ID.String()))
-		}
-		return errors.New("OpenAI returned empty response")
+		s.logger.Warn("OpenAI returned an empty response", zap.Any("aiResponse", aiResponse), zap.String("threadID", threadID.String()))
+		return "", errors.New("OpenAI returned empty response")
 	}
 
 	aiMessageContent := aiResponse.Choices[0].Message.Content
@@ -231,20 +262,13 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 		zap.Int("promptTokens", aiResponse.Usage.PromptTokens),
 		zap.Int("completionTokens", aiResponse.Usage.CompletionTokens),
 		zap.Int("totalTokens", aiResponse.Usage.TotalTokens),
-		zap.String("threadID", newThread.ID.String()),
+		zap.String("threadID", threadID.String()),
 	)
+	return aiMessageContent, nil
+}
 
-	stopTypingIndicator <- true
-
-	// 9. Post AI's first answer to the thread, splitting if necessary
-	if err := SendLongMessage(ses, newThread.ID, aiMessageContent); err != nil {
-		s.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", newThread.ID.String()))
-		// The user has the thread, but the AI message failed to send. This is not ideal.
-		// We won't return an error to the interaction itself as the thread is created.
-		// However, it might be good to log this prominently or alert an admin.
-	}
-
-	// 10. Store the initial user prompt and AI response in the cache
+// storeMessagesInCache stores the user prompt and AI response in the message cache.
+func (s *Service) storeMessagesInCache(threadIDStr string, userPrompt, aiMessageContent, modelUsed string) {
 	if s.messagesCache != nil {
 		history := []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
@@ -252,12 +276,9 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 		}
 		cacheData := &gpt.MessagesCacheData{
 			Messages: history,
-			Model:    modelToUse,
+			Model:    modelUsed,
 		}
-		s.messagesCache.Add(newThread.ID.String(), cacheData)
-		s.logger.Debug("Stored initial messages in cache", zap.String("threadID", newThread.ID.String()))
+		s.messagesCache.Add(threadIDStr, cacheData)
+		s.logger.Debug("Stored initial messages in cache", zap.String("threadID", threadIDStr))
 	}
-
-	s.logger.Info("Chat interaction processing completed successfully", zap.String("threadID", newThread.ID.String()))
-	return nil
 }

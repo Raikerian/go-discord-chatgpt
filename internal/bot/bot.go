@@ -49,7 +49,7 @@ func NewBot(params NewBotParameters) (*Bot, error) { // Updated signature
 	if params.CmdManager == nil { // Added check for CmdManager
 		return nil, fmt.Errorf("command manager provided to NewBot is nil")
 	}
-	if params.Cfg.ApplicationID == nil || *params.Cfg.ApplicationID == 0 {
+	if params.Cfg.Discord.ApplicationID == nil || *params.Cfg.Discord.ApplicationID == 0 {
 		return nil, fmt.Errorf("application ID is not set or is zero in config")
 	}
 
@@ -88,8 +88,8 @@ func (b *Bot) Start(ctx context.Context) error { // Added context parameter
 
 	// Convert string guild IDs from config to discord.GuildID
 	var guildIDs []discord.GuildID
-	if b.Config != nil && len(b.Config.GuildIDs) > 0 {
-		for _, idStr := range b.Config.GuildIDs {
+	if b.Config != nil && len(b.Config.Discord.GuildIDs) > 0 {
+		for _, idStr := range b.Config.Discord.GuildIDs {
 			sf, err := discord.ParseSnowflake(idStr)
 			if err != nil {
 				b.Logger.Error("Failed to parse guild ID string to Snowflake", zap.String("guildIDStr", idStr), zap.Error(err))
@@ -118,8 +118,8 @@ func (b *Bot) Stop(ctx context.Context) error { // Added context parameter
 
 	// Unregister slash commands on shutdown
 	var guildIDs []discord.GuildID
-	if b.Config != nil && len(b.Config.GuildIDs) > 0 {
-		for _, idStr := range b.Config.GuildIDs {
+	if b.Config != nil && len(b.Config.Discord.GuildIDs) > 0 {
+		for _, idStr := range b.Config.Discord.GuildIDs {
 			sf, err := discord.ParseSnowflake(idStr)
 			if err != nil {
 				b.Logger.Error("Failed to parse guild ID string to Snowflake for unregistering", zap.String("guildIDStr", idStr), zap.Error(err))

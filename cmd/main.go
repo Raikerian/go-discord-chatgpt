@@ -159,15 +159,15 @@ type NewSessionResult struct {
 // It provides the *session.Session to the Fx dependency graph.
 // The session\'s Open and Close methods are tied to the Fx lifecycle.
 func NewSession(params NewSessionParameters) (NewSessionResult, error) { // Added Logger to params
-	if params.Cfg.BotToken == "" {
+	if params.Cfg.Discord.BotToken == "" {
 		return NewSessionResult{}, fmt.Errorf("discord bot token is not set in config")
 	}
 
-	if params.Cfg.ApplicationID == nil {
+	if params.Cfg.Discord.ApplicationID == nil {
 		return NewSessionResult{}, fmt.Errorf("application ID is not set in config")
 	}
 
-	s := session.New("Bot " + params.Cfg.BotToken) // Corrected: session.New returns only one value
+	s := session.New("Bot " + params.Cfg.Discord.BotToken) // Corrected: session.New returns only one value
 
 	s.AddIntents(gateway.IntentGuilds)
 	s.AddIntents(gateway.IntentGuildMessages)
@@ -194,11 +194,11 @@ func NewSession(params NewSessionParameters) (NewSessionResult, error) { // Adde
 // provideDiscordAppID extracts the ApplicationID from the config and provides it as a discord.AppID.
 // It also logs the AppID being provided.
 func provideDiscordAppID(cfg *config.Config, logger *zap.Logger) (discord.AppID, error) {
-	if cfg.ApplicationID == nil || *cfg.ApplicationID == 0 {
+	if cfg.Discord.ApplicationID == nil || *cfg.Discord.ApplicationID == 0 {
 		logger.Error("Application ID is not configured or is invalid in config")
 		return 0, fmt.Errorf("application ID is not configured or is invalid")
 	}
-	appID := discord.AppID(*cfg.ApplicationID)
+	appID := discord.AppID(*cfg.Discord.ApplicationID)
 	logger.Info("Providing Discord AppID", zap.Stringer("appID", appID))
 	return appID, nil
 }

@@ -1,0 +1,42 @@
+# Example configuration for go-discord-chatgpt
+# Copy this file to config.yaml and fill in your actual values.
+
+discord:
+  # Your Discord Bot Token.
+  # Replace "YOUR_BOT_TOKEN_HERE" with your actual bot token.
+  bot_token: "YOUR_BOT_TOKEN_HERE"
+
+  # Your Discord Application ID.
+  # Replace "YOUR_APPLICATION_ID_HERE" with your actual application ID.
+  application_id: "YOUR_APPLICATION_ID_HERE"
+
+  # Optional: List of Guild (Server) IDs where commands should be registered.
+  # If empty or omitted, commands will be registered globally.
+  # Replace with your server IDs if you want to test commands on specific servers first.
+  guild_ids:
+    - "YOUR_GUILD_ID_1_HERE"
+    # - "YOUR_GUILD_ID_2_HERE"
+
+  # Timeout in seconds for interactions (e.g., slash commands).
+  # Default is 30 seconds.
+  interaction_timeout_seconds: 30
+
+openai:
+  # Your OpenAI API Key.
+  # Replace "YOUR_OPENAI_API_KEY_HERE" with your actual API key.
+  api_key: "YOUR_OPENAI_API_KEY_HERE"
+
+  # List of preferred OpenAI models for chat functionalities.
+  # The bot will try to use them in the order they are listed.
+  models:
+    - "gpt-4o-mini" # Recommended default
+    - "gpt-4"
+    # - "gpt-3.5-turbo"
+
+  # Maximum number of message histories to cache per user/channel.
+  # This helps maintain context in ongoing conversations with ChatGPT.
+  message_cache_size: 100
+
+# Log level for the application.
+# Supported values: "debug", "info", "warn", "error", "dpanic", "panic", "fatal"
+log_level: "info"

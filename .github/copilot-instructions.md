@@ -22,9 +22,11 @@ This document provides instructions and context for GitHub Copilot to effectivel
 
 ```
 .
-├── config.yaml             # Application configuration (bot token, app ID, guild IDs, OpenAI key, models, cache size, log level, interaction timeout)
+├── config.yaml             # Application configuration
+├── config.example.yaml     # Example configuration file
 ├── go.mod                  # Go module definition
 ├── go.sum                  # Go module checksums
+├── LICENSE                 # Project license
 ├── README.md               # Project README
 ├── .mockery.yml            # Configuration for Mockery mock generation.
 ├── cmd/

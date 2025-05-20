@@ -4,6 +4,7 @@ import (
 	"github.com/diamondburned/arikawa/v3/api"
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/session"
+
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 )
@@ -67,7 +68,7 @@ func (cm *CommandManager) GetCommand(name string) (Command, bool) {
 // RegisterCommands registers all loaded commands with Discord for the specified guilds.
 func (cm *CommandManager) RegisterCommands(guildIDs []discord.GuildID) {
 	cm.logger.Info("Registering slash commands with Discord for specified guilds...", zap.Int("commandCount", len(cm.commandMap)))
-	var cmdsToRegister []api.CreateCommandData // Renamed to avoid conflict
+	var cmdsToRegister []api.CreateCommandData
 	for _, cmd := range cm.commandMap {
 		cmdsToRegister = append(cmdsToRegister, api.CreateCommandData{
 			Name:        cmd.Name(),
@@ -85,7 +86,7 @@ func (cm *CommandManager) RegisterCommands(guildIDs []discord.GuildID) {
 	// Global commands registration (if no guildIDs are specified)
 	if len(guildIDs) == 0 {
 		cm.logger.Info("No specific guild IDs provided, attempting to register commands globally.")
-		registered, err := cm.session.BulkOverwriteCommands(cm.applicationID, cmdsToRegister) // Corrected: Use cm.session.BulkOverwriteCommands for global
+		registered, err := cm.session.BulkOverwriteCommands(cm.applicationID, cmdsToRegister)
 		if err != nil {
 			cm.logger.Error("Failed to bulk overwrite global commands",
 				zap.Error(err),
@@ -127,7 +128,7 @@ func (cm *CommandManager) UnregisterAllCommands(guildIDs []discord.GuildID) {
 	if len(guildIDs) == 0 {
 		cm.logger.Info("No specific guild IDs provided, attempting to unregister all global commands.")
 		// Pass an empty slice to unregister all commands
-		_, err := cm.session.BulkOverwriteCommands(cm.applicationID, []api.CreateCommandData{}) // Corrected: Use cm.session.BulkOverwriteCommands for global
+		_, err := cm.session.BulkOverwriteCommands(cm.applicationID, []api.CreateCommandData{})
 		if err != nil {
 			cm.logger.Error("Failed to unregister global commands",
 				zap.Error(err),

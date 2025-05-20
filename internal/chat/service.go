@@ -8,12 +8,15 @@ import (
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
+
 	"github.com/diamondburned/arikawa/v3/api"
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
 	"github.com/diamondburned/arikawa/v3/utils/json/option"
+
 	"github.com/sashabaranov/go-openai"
+
 	"go.uber.org/zap"
 )
 
@@ -104,11 +107,6 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 	}
 
 	// Attempt to post AI response to the thread.
-	// The postAIResponseToThread helper function logs any errors that occur.
-	// This error is intentionally not returned to the caller of HandleChatInteraction
-	// because the primary interaction (thread creation) was successful,
-	// and the user already has access to the thread.
-	// _ = s.postAIResponseToThread(ses, newThread.ID, aiMessageContent)
 	if err := SendLongMessage(ses, newThread.ID, aiMessageContent); err != nil {
 		s.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", newThread.ID.String()))
 		// Note: This error means the AI's message didn't make it to the thread,

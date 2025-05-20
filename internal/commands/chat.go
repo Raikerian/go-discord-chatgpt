@@ -22,7 +22,7 @@ import (
 type ChatCommand struct {
 	logger      *zap.Logger
 	cfg         *config.Config // Retained for model list in Options()
-	chatService *chat.Service  // Use the new chat service
+	chatService *chat.Service
 }
 
 // NewChatCommand creates a new ChatCommand.

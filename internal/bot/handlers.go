@@ -1,29 +1,29 @@
 package bot
 
 import (
-	"context" // Added context
+	"context"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/commands"
+
 	"github.com/diamondburned/arikawa/v3/api"
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
 	"github.com/diamondburned/arikawa/v3/utils/json/option"
-	"go.uber.org/zap" // Added zap
+
+	"go.uber.org/zap"
 )
 
-// Updated handleInteraction to accept context, logger and command manager
 func handleInteraction(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, logger *zap.Logger, cmdManager *commands.CommandManager) {
-	// Check if it\'s a slash command
+	// Check if it's a slash command
 	switch data := e.Data.(type) {
 	case *discord.CommandInteraction:
-		logger.Info("Received slash command", zap.String("commandName", data.Name), zap.String("user", e.Member.User.Username)) // Replaced log
+		logger.Info("Received slash command", zap.String("commandName", data.Name), zap.String("user", e.Member.User.Username))
 
 		// Get the command handler
-		// Assuming GetCommand is updated or CommandManager is used here if it now holds commands
-		cmd, ok := cmdManager.GetCommand(data.Name) // Use CommandManager to get the command
+		cmd, ok := cmdManager.GetCommand(data.Name)
 		if !ok {
-			logger.Warn("Unknown command", zap.String("commandName", data.Name)) // Replaced log
+			logger.Warn("Unknown command", zap.String("commandName", data.Name))
 			// Optionally send a response back to the user indicating the command is not found
 			err := s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
 				Type: api.MessageInteractionWithSource,
@@ -32,18 +32,15 @@ func handleInteraction(ctx context.Context, s *session.Session, e *gateway.Inter
 				},
 			})
 			if err != nil {
-				logger.Error("Failed to respond to interaction for unknown command", zap.Error(err)) // Replaced log
+				logger.Error("Failed to respond to interaction for unknown command", zap.Error(err))
 			}
 			return
 		}
 
 		// Execute the command
-		// Pass context and logger to the command execution if the interface supports it.
-		// For now, assuming Execute does not take context/logger, but ideally it would.
-		// If CommandExecute needs logger, it should be part of the Command interface and struct.
-		err := cmd.Execute(ctx, s, e, data) // This would ideally be cmd.Execute(ctx, s, e, data, logger)
+		err := cmd.Execute(ctx, s, e, data)
 		if err != nil {
-			logger.Error("Error executing command", zap.String("commandName", data.Name), zap.Error(err)) // Replaced log
+			logger.Error("Error executing command", zap.String("commandName", data.Name), zap.Error(err))
 			// Optionally send an error response back to the user
 			errResp := s.RespondInteraction(e.ID, e.Token, api.InteractionResponse{
 				Type: api.MessageInteractionWithSource,
@@ -52,13 +49,13 @@ func handleInteraction(ctx context.Context, s *session.Session, e *gateway.Inter
 				},
 			})
 			if errResp != nil {
-				logger.Error("Failed to send error response for command execution", zap.Error(errResp)) // Replaced log
+				logger.Error("Failed to send error response for command execution", zap.Error(errResp))
 			}
 		} else {
 			logger.Info("Command executed successfully", zap.String("commandName", data.Name))
 		}
 
 	default:
-		logger.Debug("Received unhandled interaction type", zap.Any("type", e.Data)) // Replaced log
+		logger.Debug("Received unhandled interaction type", zap.Any("type", e.Data))
 	}
 }

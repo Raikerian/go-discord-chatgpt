@@ -13,11 +13,11 @@ import (
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
 
-	"github.com/diamondburned/arikawa/v3/discord" // Ensure discord package is imported for discord.AppID
+	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
 
-	"github.com/sashabaranov/go-openai" // Added OpenAI client import
+	"github.com/sashabaranov/go-openai"
 
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
@@ -101,7 +101,7 @@ func (p *zapFxPrinter) LogEvent(event fxevent.Event) {
 
 // Printf implements fx.Printer
 func (p *zapFxPrinter) Printf(format string, args ...interface{}) {
-	// You can choose the log level for Fx's own messages. Info is usually fine.
+	// Fx's own messages. Info is usually fine.
 	p.logger.Infof(format, args...)
 }
 
@@ -165,7 +165,7 @@ type NewSessionParameters struct {
 	fx.In
 	Cfg    *config.Config
 	LC     fx.Lifecycle
-	Logger *zap.Logger // Added Logger
+	Logger *zap.Logger
 }
 
 // NewSessionResult holds results from NewSession
@@ -176,8 +176,8 @@ type NewSessionResult struct {
 
 // NewSession creates and manages a new Discord session.
 // It provides the *session.Session to the Fx dependency graph.
-// The session\'s Open and Close methods are tied to the Fx lifecycle.
-func NewSession(params NewSessionParameters) (NewSessionResult, error) { // Added Logger to params
+// The session's Open and Close methods are tied to the Fx lifecycle.
+func NewSession(params NewSessionParameters) (NewSessionResult, error) {
 	if params.Cfg.Discord.BotToken == "" {
 		return NewSessionResult{}, fmt.Errorf("discord bot token is not set in config")
 	}
@@ -186,7 +186,7 @@ func NewSession(params NewSessionParameters) (NewSessionResult, error) { // Adde
 		return NewSessionResult{}, fmt.Errorf("application ID is not set in config")
 	}
 
-	s := session.New("Bot " + params.Cfg.Discord.BotToken) // Corrected: session.New returns only one value
+	s := session.New("Bot " + params.Cfg.Discord.BotToken)
 
 	s.AddIntents(gateway.IntentGuilds)
 	s.AddIntents(gateway.IntentGuildMessages)
@@ -203,7 +203,7 @@ func NewSession(params NewSessionParameters) (NewSessionResult, error) { // Adde
 		},
 		OnStop: func(ctx context.Context) error {
 			params.Logger.Info("Closing Discord session...")
-			return s.Close() // Corrected: s.Close() does not take context
+			return s.Close()
 		},
 	})
 
@@ -237,7 +237,7 @@ func provideMessageCacheSize(cfg *config.Config, logger *zap.Logger) int {
 var Module = fx.Options(
 	fx.Provide(
 		// Configuration
-		config.LoadConfig, // Corrected to use LoadConfig
+		config.LoadConfig,
 
 		// Logger
 		NewZapLogger,
@@ -246,7 +246,7 @@ var Module = fx.Options(
 		NewOpenAIClient,
 
 		// Message Cache Size (int)
-		provideMessageCacheSize, // Add this provider
+		provideMessageCacheSize,
 
 		// Message Cache
 		gpt.NewMessagesCache,
@@ -255,10 +255,10 @@ var Module = fx.Options(
 		NewSession,
 
 		// Discord AppID
-		provideDiscordAppID, // Add this provider
+		provideDiscordAppID,
 
 		// Chat Service
-		chat.NewService, // Provide the new chat service
+		chat.NewService,
 
 		// Command Manager
 		commands.NewCommandManager,
@@ -283,7 +283,7 @@ var Module = fx.Options(
 			fx.ResultTags(`group:"commands"`),
 		),
 	),
-	fx.Invoke(func(lc fx.Lifecycle, b *bot.Bot, logger *zap.Logger, s *session.Session, cfg *config.Config) { // Updated Invoke
+	fx.Invoke(func(lc fx.Lifecycle, b *bot.Bot, logger *zap.Logger, s *session.Session, cfg *config.Config) {
 		lc.Append(fx.Hook{
 			OnStart: func(ctx context.Context) error {
 				logger.Info("Executing OnStart hook: Starting bot and registering commands.")
@@ -312,8 +312,6 @@ var Module = fx.Options(
 	}),
 	// Provide all command implementations. Fx will collect them if they are provided as commands.Command
 	// This requires each command to have a constructor that Fx can use.
-	// For now, commands are registered via init() in their respective files.
-	// If you want Fx to manage command instances, you'd change command registration.
 
 	// Example of how you might provide commands if they were Fx components:
 	// fx.Provide(fx.Annotate(commands.NewPingCommand, fx.As(new(commands.Command)))),
@@ -344,7 +342,6 @@ func main() {
 
 	// If app.Run() returns, it means the application is shutting down.
 	// We can log this event. Fx has already handled the shutdown of components.
-	// (Assuming a logger is accessible here, or rely on Fx's OnStop hooks for logging)
 
 	// Set up a channel to listen for OS signals (like Ctrl+C).
 	sigCh := make(chan os.Signal, 1)
@@ -353,7 +350,7 @@ func main() {
 	// Block until a signal is received.
 	select {
 	case s := <-sigCh:
-		// Log the received signal. (Requires logger access or handle in Fx OnStop)
+		// Log the received signal.
 		fmt.Printf("Received signal: %s, initiating shutdown.\n", s)
 	case <-app.Done():
 		// The application shut down for another reason (e.g., an error in a lifecycle hook).

@@ -30,7 +30,6 @@ func (c *PingCommand) Description() string {
 }
 
 // Options returns the command options.
-// Corrected to return []discord.CommandOption to match the Command interface.
 func (c *PingCommand) Options() []discord.CommandOption {
 	return nil // No options for this command
 }

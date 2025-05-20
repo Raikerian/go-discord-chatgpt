@@ -1,19 +1,19 @@
 package bot
 
 import (
-	"context" // Added context
+	"context"
 	"fmt"
 	"time"
 
-	// "log" // Replaced with zap
-
 	"github.com/Raikerian/go-discord-chatgpt/internal/commands"
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
-	"github.com/diamondburned/arikawa/v3/discord" // Ensure discord is imported for discord.AppID
+
+	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
-	"go.uber.org/fx"  // Added fx import
-	"go.uber.org/zap" // Added zap
+
+	"go.uber.org/fx"
+	"go.uber.org/zap"
 )
 
 // Bot represents the Discord bot.
@@ -21,7 +21,7 @@ type Bot struct {
 	Session    *session.Session
 	Config     *config.Config
 	CmdManager *commands.CommandManager
-	Logger     *zap.Logger // Added Logger
+	Logger     *zap.Logger
 }
 
 // NewBotParameters holds dependencies for NewBot
@@ -60,7 +60,6 @@ func NewBot(params NewBotParameters) (*Bot, error) {
 		CmdManager: params.CmdManager,
 	}
 
-	// Handler registration is now moved to the Start method.
 	params.Logger.Info("NewBot created successfully. Handler registration will occur in Start.")
 	return b, nil
 }
@@ -128,7 +127,7 @@ func (b *Bot) Start(ctx context.Context) error {
 }
 
 // Stop gracefully shuts down the bot.
-func (b *Bot) Stop(ctx context.Context) error { // Added context parameter
+func (b *Bot) Stop(ctx context.Context) error {
 	b.Logger.Info("Stopping bot...")
 
 	// Unregister slash commands on shutdown

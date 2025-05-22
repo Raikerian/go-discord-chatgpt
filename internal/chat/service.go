@@ -295,11 +295,57 @@ func (s *Service) storeMessagesInCache(threadIDStr string, userPrompt, aiMessage
 func (s *Service) HandleThreadMessage(ctx context.Context, ses *session.Session, evt *gateway.MessageCreateEvent) error {
 	threadID := evt.ChannelID.String()
 	if _, found := s.negativeThreadCache.Get(threadID); found {
-		s.logger.Debug("Skipping message in thread not managed by us", zap.String("threadID", threadID))
+		s.logger.Debug("Skipping message in thread not managed by us (negative cache hit)", zap.String("threadID", threadID))
 		return nil
 	}
 
-	// TODO: implement
-	s.logger.Info("HandleThreadMessage called (stub)", zap.String("threadID", evt.ChannelID.String()), zap.String("userID", evt.Author.ID.String()), zap.String("message", evt.Content))
+	cachedData, found := s.messagesCache.Get(threadID)
+	if !found {
+		s.logger.Debug("Skipping message in thread not managed by us (not in primary cache)", zap.String("threadID", threadID))
+		// Optionally, add to negative cache here if we are sure this thread isn't ours
+		// s.negativeThreadCache.Add(threadID, struct{}{})
+		return nil
+	}
+
+	s.logger.Info("Processing message in managed thread",
+		zap.String("threadID", threadID),
+		zap.String("userID", evt.Author.ID.String()),
+		zap.String("message", evt.Content),
+	)
+
+	// Append the new user message to the history
+	newUserMessage := openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleUser,
+		Content: evt.Content,
+	}
+	cachedData.Messages = append(cachedData.Messages, newUserMessage)
+
+	// TODO: Implement the full OpenAI call and response handling logic
+	// For now, we'll just log that we would make the call and update the cache stub.
+	s.logger.Info("Stub: Would call OpenAI with updated history",
+		zap.String("threadID", threadID),
+		zap.Int("historyLength", len(cachedData.Messages)),
+		zap.String("model", cachedData.Model),
+	)
+
+	// Placeholder for AI response
+	aiResponseContent := "This is a stubbed AI response."
+
+	// Append AI's (stubbed) response to history
+	aiMessage := openai.ChatCompletionMessage{
+		Role:    openai.ChatMessageRoleAssistant,
+		Content: aiResponseContent,
+	}
+	cachedData.Messages = append(cachedData.Messages, aiMessage)
+
+	// Update the cache with the new history
+	s.messagesCache.Add(threadID, cachedData)
+	s.logger.Info("Stub: Updated message cache with new user and AI (stubbed) messages", zap.String("threadID", threadID))
+
+	// TODO: Send the AI's actual response to the Discord thread
+	// For now, we'll just log that we would send a message.
+	s.logger.Info("Stub: Would send AI response to thread", zap.String("threadID", threadID), zap.String("response", aiResponseContent))
+	// Example: if err := SendLongMessage(ses, evt.ChannelID, aiResponseContent); err != nil { ... }
+
 	return nil
 }

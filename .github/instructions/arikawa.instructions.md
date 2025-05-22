@@ -1,7 +1,7 @@
 ---
-description: "Arikawa Discord API Library Instructions"
+description: "This instruction should guide Copilot in assisting with Go projects using the Arikawa library."
 ---
-# GitHub Copilot Prompt: Using the Arikawa Discord API Library
+# GitHub Copilot Instruction: Using the Arikawa Discord API Library
 
 **Note:** File paths and examples referenced in this document link to the `v3.5.0` tag of the `github.com/diamondburned/arikawa/v3` repository, which corresponds to the version used in this project.
 
@@ -445,5 +445,3 @@ This document provides instructions and guidelines for using the Arikawa Discord
 - The official Discord API documentation is your best friend for understanding endpoints, parameters, and limitations. Arikawa often links to relevant docs in its comments.
 - Use `context.Context` for request cancellation and timeouts, e.g., `s.WithContext(ctx).SendMessage(...)` ([`api.Client.WithContext`](https://github.com/diamondburned/arikawa/blob/v3.5.0/api/api.go)).
 - Be mindful of rate limits. Arikawa's client handles them automatically, but understanding them can help design more efficient bots.
-
-This prompt should guide Copilot in assisting with Go projects using the Arikawa library.

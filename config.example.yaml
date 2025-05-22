@@ -37,6 +37,12 @@ openai:
   # This helps maintain context in ongoing conversations with ChatGPT.
   message_cache_size: 100
 
+  # Maximum number of thread IDs to cache that should not be processed (e.g., non-bot threads).
+  negative_thread_cache_size: 1000
+
+  # Maximum number of concurrent requests to OpenAI.
+  max_concurrent_requests: 5
+
 # Log level for the application.
 # Supported values: "debug", "info", "warn", "error", "dpanic", "panic", "fatal"
 log_level: "info"

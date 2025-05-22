@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync" // Added for ongoingRequests
 	"time"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
@@ -28,19 +29,28 @@ const (
 // Service handles the core logic for chat interactions.
 // It uses OpenAI and a message cache.
 type Service struct {
-	logger        *zap.Logger
-	cfg           *config.Config
-	openaiClient  *openai.Client
-	messagesCache *gpt.MessagesCache
+	logger              *zap.Logger
+	cfg                 *config.Config
+	openaiClient        *openai.Client
+	messagesCache       *gpt.MessagesCache
+	negativeThreadCache *gpt.NegativeThreadCache
+	ongoingRequests     sync.Map // map[discord.ChannelID]context.CancelFunc
 }
 
 // NewService creates a new chat Service.
-func NewService(logger *zap.Logger, cfg *config.Config, openaiClient *openai.Client, messagesCache *gpt.MessagesCache) *Service {
+func NewService(
+	logger *zap.Logger,
+	cfg *config.Config,
+	openaiClient *openai.Client,
+	messagesCache *gpt.MessagesCache,
+	negativeThreadCache *gpt.NegativeThreadCache,
+) *Service {
 	return &Service{
-		logger:        logger.Named("chat_service"),
-		cfg:           cfg,
-		openaiClient:  openaiClient,
-		messagesCache: messagesCache,
+		logger:              logger.Named("chat_service"),
+		cfg:                 cfg,
+		openaiClient:        openaiClient,
+		messagesCache:       messagesCache,
+		negativeThreadCache: negativeThreadCache,
 	}
 }
 

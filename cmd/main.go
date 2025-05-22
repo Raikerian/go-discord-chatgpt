@@ -222,15 +222,26 @@ func provideDiscordAppID(cfg *config.Config, logger *zap.Logger) (discord.AppID,
 	return appID, nil
 }
 
-// provideMessageCacheSize extracts the MessageCacheSize from the config and provides it as an int.
-func provideMessageCacheSize(cfg *config.Config, logger *zap.Logger) int {
+// resolveMessageCacheSize determines the message cache size from config.
+func resolveMessageCacheSize(cfg *config.Config, logger *zap.Logger) (int, error) {
 	size := cfg.OpenAI.MessageCacheSize
 	if size <= 0 {
 		logger.Warn("OpenAI MessageCacheSize is not configured or is invalid, defaulting to 100", zap.Int("configuredSize", size))
-		return 100 // Default to a sensible value if not configured or invalid
+		size = 100 // Default to a sensible value if not configured or invalid
 	}
 	logger.Info("Providing OpenAI MessageCacheSize", zap.Int("size", size))
-	return size
+	return size, nil
+}
+
+// resolveNegativeThreadCacheSize determines the negative thread cache size from config.
+func resolveNegativeThreadCacheSize(cfg *config.Config, logger *zap.Logger) (int, error) {
+	size := cfg.OpenAI.NegativeThreadCacheSize
+	if size <= 0 {
+		logger.Warn("OpenAI NegativeThreadCacheSize is not configured or is invalid, defaulting to 1000", zap.Int("configuredSize", size))
+		size = 1000 // Default to a sensible value if not configured or invalid
+	}
+	logger.Info("Providing OpenAI NegativeThreadCacheSize", zap.Int("size", size))
+	return size, nil
 }
 
 // Module exports Fx providers for the main application.
@@ -246,10 +257,22 @@ var Module = fx.Options(
 		NewOpenAIClient,
 
 		// Message Cache Size (int)
-		provideMessageCacheSize,
+		fx.Annotate(
+			resolveMessageCacheSize,
+			fx.ResultTags(`name:"messageCacheSize"`),
+		),
+
+		// Negative Thread Cache Size (int)
+		fx.Annotate(
+			resolveNegativeThreadCacheSize,
+			fx.ResultTags(`name:"negativeThreadCacheSize"`),
+		),
 
 		// Message Cache
 		gpt.NewMessagesCache,
+
+		// Negative Thread Cache
+		gpt.NewNegativeThreadCache,
 
 		// Discord Session
 		NewSession,
@@ -310,12 +333,6 @@ var Module = fx.Options(
 			},
 		})
 	}),
-	// Provide all command implementations. Fx will collect them if they are provided as commands.Command
-	// This requires each command to have a constructor that Fx can use.
-
-	// Example of how you might provide commands if they were Fx components:
-	// fx.Provide(fx.Annotate(commands.NewPingCommand, fx.As(new(commands.Command)))),
-	// fx.Provide(fx.Annotate(commands.NewVersionCommand, fx.As(new(commands.Command)))),
 )
 
 func main() {

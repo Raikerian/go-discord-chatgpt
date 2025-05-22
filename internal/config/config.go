@@ -15,9 +15,11 @@ type DiscordConfig struct {
 }
 
 type OpenAIConfig struct {
-	APIKey           string   `yaml:"api_key"`
-	Models           []string `yaml:"models"`
-	MessageCacheSize int      `yaml:"message_cache_size"`
+	APIKey                  string   `yaml:"api_key"`
+	Models                  []string `yaml:"models"`
+	MessageCacheSize        int      `yaml:"message_cache_size"`
+	NegativeThreadCacheSize int      `yaml:"negative_thread_cache_size"`
+	MaxConcurrentRequests   int      `yaml:"max_concurrent_requests"`
 }
 
 type Config struct {

@@ -293,6 +293,12 @@ func (s *Service) storeMessagesInCache(threadIDStr string, userPrompt, aiMessage
 
 // HandleThreadMessage handles messages sent in a thread that the bot is part of.
 func (s *Service) HandleThreadMessage(ctx context.Context, ses *session.Session, evt *gateway.MessageCreateEvent) error {
+	threadID := evt.ChannelID.String()
+	if _, found := s.negativeThreadCache.Get(threadID); found {
+		s.logger.Debug("Skipping message in thread not managed by us", zap.String("threadID", threadID))
+		return nil
+	}
+
 	// TODO: implement
 	s.logger.Info("HandleThreadMessage called (stub)", zap.String("threadID", evt.ChannelID.String()), zap.String("userID", evt.Author.ID.String()), zap.String("message", evt.Content))
 	return nil

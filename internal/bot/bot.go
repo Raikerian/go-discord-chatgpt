@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Raikerian/go-discord-chatgpt/internal/chat"
 	"github.com/Raikerian/go-discord-chatgpt/internal/commands"
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 
@@ -18,10 +19,11 @@ import (
 
 // Bot represents the Discord bot.
 type Bot struct {
-	Session    *session.Session
-	Config     *config.Config
-	CmdManager *commands.CommandManager
-	Logger     *zap.Logger
+	Session     *session.Session
+	Config      *config.Config
+	CmdManager  *commands.CommandManager
+	Logger      *zap.Logger
+	ChatService *chat.Service
 }
 
 // NewBotParameters holds dependencies for NewBot
@@ -32,10 +34,11 @@ type NewBotParameters struct {
 	S          *session.Session
 	Logger     *zap.Logger
 	CmdManager *commands.CommandManager
+	ChatSvc    *chat.Service
 }
 
 // NewBot creates and initializes a new Bot.
-// The session and logger are now injected by Fx.
+// The session, logger, and chat service are now injected by Fx.
 func NewBot(params NewBotParameters) (*Bot, error) {
 	if params.S == nil {
 		return nil, fmt.Errorf("session provided to NewBot is nil")
@@ -49,15 +52,19 @@ func NewBot(params NewBotParameters) (*Bot, error) {
 	if params.CmdManager == nil {
 		return nil, fmt.Errorf("command manager provided to NewBot is nil")
 	}
+	if params.ChatSvc == nil {
+		return nil, fmt.Errorf("chat service provided to NewBot is nil")
+	}
 	if params.Cfg.Discord.ApplicationID == nil || *params.Cfg.Discord.ApplicationID == 0 {
 		return nil, fmt.Errorf("application ID is not set or is zero in config")
 	}
 
 	b := &Bot{
-		Session:    params.S,
-		Config:     params.Cfg,
-		Logger:     params.Logger,
-		CmdManager: params.CmdManager,
+		Session:     params.S,
+		Config:      params.Cfg,
+		Logger:      params.Logger,
+		CmdManager:  params.CmdManager,
+		ChatService: params.ChatSvc, // Initialize ChatService
 	}
 
 	params.Logger.Info("NewBot created successfully. Handler registration will occur in Start.")
@@ -90,7 +97,36 @@ func (b *Bot) Start(ctx context.Context) error {
 
 		handleInteraction(interactionCtx, b.Session, e, b.Logger, b.CmdManager)
 	})
-	b.Logger.Info("InteractionCreateEvent handler added to session.")
+
+	// Add MessageCreateEvent handler
+	b.Session.AddHandler(func(e *gateway.MessageCreateEvent) {
+		// Filter out messages from bots
+		if e.Author.Bot {
+			return
+		}
+
+		// Check if the message is in a thread by fetching channel info
+		ch, err := b.Session.Channel(e.ChannelID)
+		if err != nil {
+			b.Logger.Warn("Failed to fetch channel info for MessageCreateEvent", zap.Error(err), zap.String("channelID", e.ChannelID.String()))
+			return
+		}
+
+		isThread := ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread // Corrected deprecated constant
+		if !isThread {
+			return
+		}
+
+		// Forward to chat service
+		if err := b.ChatService.HandleThreadMessage(context.Background(), b.Session, e); err != nil {
+			b.Logger.Error("Error handling thread message",
+				zap.Error(err),
+				zap.String("threadID", e.ChannelID.String()),
+				zap.String("messageID", e.ID.String()),
+			)
+		}
+	})
+	b.Logger.Info("InteractionCreateEvent and MessageCreateEvent handlers added to session.")
 
 	b.Logger.Info("Executing further bot-specific Start logic (e.g., registering commands)...")
 

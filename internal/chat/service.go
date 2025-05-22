@@ -280,3 +280,10 @@ func (s *Service) storeMessagesInCache(threadIDStr string, userPrompt, aiMessage
 		s.logger.Debug("Stored initial messages in cache", zap.String("threadID", threadIDStr))
 	}
 }
+
+// HandleThreadMessage handles messages sent in a thread that the bot is part of.
+func (s *Service) HandleThreadMessage(ctx context.Context, ses *session.Session, evt *gateway.MessageCreateEvent) error {
+	// TODO: implement
+	s.logger.Info("HandleThreadMessage called (stub)", zap.String("threadID", evt.ChannelID.String()), zap.String("userID", evt.Author.ID.String()), zap.String("message", evt.Content))
+	return nil
+}

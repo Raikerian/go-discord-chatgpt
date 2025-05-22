@@ -9,7 +9,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 ## Key Technologies & Libraries
 
 *   **Go**: The primary programming language.
-*   **Arikawa (v3)**: Go library for the Discord API. Used for session management, event handling, and command registration.
+*   **Arikawa (v3)**: Go library for the Discord API. Used for session management, event handling, and command registration. (See also: [`arikawa.instructions.md`](.github/instructions/arikawa.instructions.md) for detailed guidance on using Arikawa).
 *   **Uber Fx**: Dependency injection framework. Manages the application's lifecycle and the creation and wiring of components (services, configuration, logger, OpenAI client, cache, etc.).
 *   **Zap**: Structured logging library. Used for all application logging, including Fx's internal logs.
 *   **YAML V3**: For parsing the `config.yaml` file.

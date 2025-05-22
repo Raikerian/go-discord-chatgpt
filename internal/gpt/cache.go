@@ -5,9 +5,6 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-// IgnoredChannelsCache can be used to store a set of channel IDs where caching is disabled.
-type IgnoredChannelsCache map[string]struct{}
-
 // MessagesCache holds the LRU cache for chat messages.
 type MessagesCache struct {
 	*lru.Cache[string, *MessagesCacheData]

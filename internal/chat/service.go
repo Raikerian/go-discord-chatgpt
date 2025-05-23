@@ -317,14 +317,15 @@ func (s *Service) HandleThreadMessage(ctx context.Context, ses *session.Session,
 		modelToUse = cachedData.Model
 	} else {
 		s.logger.Info("Conversation not in cache, attempting to reconstruct", zap.String("threadID", threadIDStr))
-		reconstructedData, reconstructedModelName, err := s.reconstructAndCacheConversation(ctx, ses, evt.ChannelID)
+		reconstructedData, reconstructedModelName, err := s.reconstructAndCacheConversation(ctx, ses, evt.ChannelID, evt.ID)
 		if err != nil {
 			s.logger.Error("Failed to reconstruct conversation", zap.Error(err), zap.String("threadID", threadIDStr))
 			s.negativeThreadCache.Add(threadIDStr)
 			return nil
 		}
 		if reconstructedData == nil {
-			s.logger.Info("Thread not managed or initial message unparseable after reconstruction attempt", zap.String("threadID", threadIDStr))
+			s.logger.Info("Thread not managed or initial message unparseable after reconstruction attempt, adding to negative cache.", zap.String("threadID", threadIDStr))
+			// Add to negative cache as the reconstruction determined it's not a managed thread or unparseable.
 			s.negativeThreadCache.Add(threadIDStr)
 			return nil
 		}
@@ -415,8 +416,11 @@ func (s *Service) HandleThreadMessage(ctx context.Context, ses *session.Session,
 	return nil
 }
 
-func (s *Service) reconstructAndCacheConversation(ctx context.Context, ses *session.Session, threadID discord.ChannelID) (cacheData *gpt.MessagesCacheData, modelName string, err error) {
-	s.logger.Info("Attempting to reconstruct conversation history for thread", zap.String("threadID", threadID.String()))
+func (s *Service) reconstructAndCacheConversation(ctx context.Context, ses *session.Session, threadID discord.ChannelID, currentMessageIDToExclude discord.MessageID) (cacheData *gpt.MessagesCacheData, modelName string, err error) {
+	s.logger.Info("Attempting to reconstruct conversation history for thread",
+		zap.String("threadID", threadID.String()),
+		zap.String("excludingMessageID", currentMessageIDToExclude.String()),
+	)
 
 	allDiscordMessages := make([]discord.Message, 0)
 	var oldestMessageIDInBatch discord.MessageID = 0 // Start with 0 to fetch the latest messages first in the first call.
@@ -547,10 +551,19 @@ func (s *Service) reconstructAndCacheConversation(ctx context.Context, ses *sess
 	)
 
 	history := []openai.ChatCompletionMessage{}
-	history = append(history, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: parsedUserPrompt})
+	history = append(history, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: parsedUserPrompt}) // Name for the first user prompt might need to be derived if possible, or a generic one.
 
 	for i := 1; i < len(allDiscordMessages); i++ {
 		msg := allDiscordMessages[i]
+
+		// Skip the current incoming message if its ID matches
+		if msg.ID == currentMessageIDToExclude {
+			s.logger.Debug("Skipping current incoming message during history reconstruction",
+				zap.String("threadID", threadID.String()),
+				zap.String("messageID", msg.ID.String()))
+			continue
+		}
+
 		var role string
 		if msg.Author.ID == selfUser.ID {
 			role = openai.ChatMessageRoleAssistant

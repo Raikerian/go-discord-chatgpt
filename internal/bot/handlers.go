@@ -53,7 +53,7 @@ func (b *Bot) handleMessageCreate(ctx context.Context, s *session.Session, e *ga
 		return
 	}
 
-	if err := b.ChatService.HandleThreadMessage(ctx, s, e); err != nil {
+	if err := b.ChatService.HandleThreadMessage(ctx, e); err != nil {
 		b.Logger.Error("Error handling thread message via chat service",
 			zap.Error(err),
 			zap.String("threadID", e.ChannelID.String()),

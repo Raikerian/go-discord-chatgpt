@@ -10,8 +10,49 @@ import (
 )
 
 const (
-	discordMaxMessageLength = 2000 // Define Discord's max message length
+	discordMaxMessageLength           = 2000 // Define Discord's max message length
+	defaultOpenAINameOnEmptyInput     = "unknown_user"
+	defaultOpenAINameIfSanitizedEmpty = "participant"
+	defaultBotName                    = "Bot"
+	defaultInitialUserName            = "OriginalUser"
 )
+
+// GetUserDisplayName returns the user's display name, or username if display name is empty.
+func GetUserDisplayName(user discord.User) string {
+	if user.DisplayName != "" {
+		return user.DisplayName
+	}
+	return user.Username
+}
+
+// SanitizeOpenAIName ensures the name is valid for OpenAI.
+// OpenAI's spec: "May contain a-z, A-Z, 0-9, and underscores, with a maximum length of 64 characters."
+func SanitizeOpenAIName(name string) string {
+	if name == "" {
+		return defaultOpenAINameOnEmptyInput // Default for empty names
+	}
+
+	var sb strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			sb.WriteRune(r)
+		} else if r == '-' { // Convert hyphens to underscores
+			sb.WriteRune('_')
+		}
+		// Other invalid characters are skipped
+	}
+
+	sanitized := sb.String()
+	if sanitized == "" {
+		// If all characters were invalid, resulting in an empty string
+		sanitized = defaultOpenAINameIfSanitizedEmpty
+	}
+
+	if len(sanitized) > 64 {
+		return sanitized[:64]
+	}
+	return sanitized
+}
 
 // MakeThreadName generates a suitable name for a Discord thread based on the user and prompt.
 // It truncates the prompt part if the total length exceeds maxLength.

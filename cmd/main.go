@@ -280,6 +280,13 @@ var Module = fx.Options(
 		// Discord AppID
 		provideDiscordAppID,
 
+		// Chat Service Components
+		chat.NewDiscordInteractionManager,
+		chat.NewOpenAIProvider,
+		chat.NewConversationStore,
+		chat.NewModelSelector,
+		chat.NewSummaryParser,
+
 		// Chat Service
 		chat.NewService,
 

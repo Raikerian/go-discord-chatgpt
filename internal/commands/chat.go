@@ -132,7 +132,7 @@ func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 
 	// 4. Delegate to the chat service
 	// The service will handle the rest: creating thread, calling OpenAI, sending messages, caching.
-	err := c.chatService.HandleChatInteraction(ctx, s, e, userPrompt, modelOption)
+	err := c.chatService.HandleChatInteraction(ctx, e, userPrompt, modelOption)
 	if err != nil {
 		// The service itself logs detailed errors.
 		// The service also attempts to inform the user in the thread if possible.

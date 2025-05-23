@@ -26,7 +26,11 @@ const (
 	// gptDiscordTypingIndicatorCooldownSeconds is the cooldown for sending typing indicators.
 	gptDiscordTypingIndicatorCooldownSeconds = 10 // Existing constant
 	// discordMessageFetchLimit is the limit for fetching messages in a single API call during history reconstruction.
-	discordMessageFetchLimit = 100
+	discordMessageFetchLimit          = 100
+	defaultBotName                    = "Bot"
+	defaultInitialUserName            = "OriginalUser"
+	defaultOpenAINameOnEmptyInput     = "unknown_user"
+	defaultOpenAINameIfSanitizedEmpty = "participant"
 )
 
 // Service handles the core logic for chat interactions.
@@ -79,6 +83,16 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 	}
 	s.logger.Info("Determined model for chat", zap.String("modelToUse", modelToUse))
 
+	userDisplayName := getUserDisplayName(e.Member.User)
+	var botDisplayName string
+	botUser, err := ses.Me()
+	if err != nil {
+		s.logger.Error("Failed to get bot user for display name", zap.Error(err))
+		botDisplayName = defaultBotName
+	} else {
+		botDisplayName = getUserDisplayName(*botUser)
+	}
+
 	summaryMessage := fmt.Sprintf(
 		"Starting new chat session with %s!\n**User:** %s\n**Prompt:** %s\n**Model:** %s\n\nFuture messages in this thread will continue the conversation.",
 		e.Member.User.Username,
@@ -109,7 +123,7 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 	stopTypingIndicator := s.manageTypingIndicator(ses, newThread.ID)
 	defer func() { stopTypingIndicator <- true }()
 
-	aiMessageContent, err := s.getOpenAIResponse(ctx, userPrompt, modelToUse, newThread.ID)
+	aiMessageContent, err := s.getOpenAIResponse(ctx, userPrompt, modelToUse, newThread.ID, userDisplayName)
 	if err != nil {
 		// Error logged in helper, send error message to thread
 		errMsgToThread := "Sorry, I encountered an error trying to reach the AI. Please try again later."
@@ -127,7 +141,7 @@ func (s *Service) HandleChatInteraction(ctx context.Context, ses *session.Sessio
 		// to the main interaction handler as the thread itself is usable.
 	}
 
-	s.storeMessagesInCache(newThread.ID.String(), userPrompt, aiMessageContent, modelToUse)
+	s.storeMessagesInCache(newThread.ID.String(), userPrompt, aiMessageContent, modelToUse, userDisplayName, botDisplayName)
 
 	s.logger.Info("Chat interaction processing completed successfully", zap.String("threadID", newThread.ID.String()))
 	return nil
@@ -240,11 +254,12 @@ func (s *Service) manageTypingIndicator(ses *session.Session, threadID discord.C
 }
 
 // getOpenAIResponse sends the prompt to OpenAI and returns the AI's message content.
-func (s *Service) getOpenAIResponse(ctx context.Context, userPrompt, modelToUse string, threadID discord.ChannelID) (string, error) {
+func (s *Service) getOpenAIResponse(ctx context.Context, userPrompt, modelToUse string, threadID discord.ChannelID, userName string) (string, error) {
 	s.logger.Info("Sending prompt to OpenAI",
 		zap.String("userPrompt", userPrompt),
 		zap.String("modelToUse", modelToUse),
 		zap.String("threadID", threadID.String()),
+		zap.String("userName", userName),
 	)
 
 	aiRequest := openai.ChatCompletionRequest{
@@ -253,6 +268,7 @@ func (s *Service) getOpenAIResponse(ctx context.Context, userPrompt, modelToUse 
 			{
 				Role:    openai.ChatMessageRoleUser,
 				Content: userPrompt,
+				Name:    sanitizeOpenAIName(userName),
 			},
 		},
 	}
@@ -279,11 +295,11 @@ func (s *Service) getOpenAIResponse(ctx context.Context, userPrompt, modelToUse 
 }
 
 // storeMessagesInCache stores the user prompt and AI response in the message cache.
-func (s *Service) storeMessagesInCache(threadIDStr string, userPrompt, aiMessageContent, modelUsed string) {
+func (s *Service) storeMessagesInCache(threadIDStr string, userPrompt, aiMessageContent, modelUsed string, userName, botName string) {
 	if s.messagesCache != nil {
 		history := []openai.ChatCompletionMessage{
-			{Role: openai.ChatMessageRoleUser, Content: userPrompt},
-			{Role: openai.ChatMessageRoleAssistant, Content: aiMessageContent},
+			{Role: openai.ChatMessageRoleUser, Content: userPrompt, Name: sanitizeOpenAIName(userName)},
+			{Role: openai.ChatMessageRoleAssistant, Content: aiMessageContent, Name: sanitizeOpenAIName(botName)},
 		}
 		cacheData := &gpt.MessagesCacheData{
 			Messages: history,
@@ -334,9 +350,11 @@ func (s *Service) HandleThreadMessage(ctx context.Context, ses *session.Session,
 	}
 
 	// Append the new user message
+	authorDisplayName := getUserDisplayName(evt.Author)
 	newUserMessage := openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
 		Content: evt.Content,
+		Name:    sanitizeOpenAIName(authorDisplayName),
 	}
 	cachedData.Messages = append(cachedData.Messages, newUserMessage)
 
@@ -405,9 +423,18 @@ func (s *Service) HandleThreadMessage(ctx context.Context, ses *session.Session,
 	}
 
 	// Update Cache
+	botUser, err := ses.Me()
+	var botDisplayName string
+	if err != nil {
+		s.logger.Error("Failed to get bot user for display name in HandleThreadMessage", zap.Error(err))
+		botDisplayName = defaultBotName
+	} else {
+		botDisplayName = getUserDisplayName(*botUser)
+	}
 	aiMessage := openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleAssistant,
 		Content: aiMessageContent,
+		Name:    sanitizeOpenAIName(botDisplayName),
 	}
 	cachedData.Messages = append(cachedData.Messages, aiMessage)
 	s.messagesCache.Add(threadIDStr, cachedData)
@@ -421,6 +448,13 @@ func (s *Service) reconstructAndCacheConversation(ctx context.Context, ses *sess
 		zap.String("threadID", threadID.String()),
 		zap.String("excludingMessageID", currentMessageIDToExclude.String()),
 	)
+
+	selfUser, err := ses.Me()
+	if err != nil {
+		s.logger.Error("Failed to get self user for reconstruction validation", zap.Error(err), zap.String("threadID", threadID.String()))
+		return nil, "", fmt.Errorf("failed to get self user: %w", err)
+	}
+	botDisplayName := getUserDisplayName(*selfUser)
 
 	allDiscordMessages := make([]discord.Message, 0)
 	var oldestMessageIDInBatch discord.MessageID = 0 // Start with 0 to fetch the latest messages first in the first call.
@@ -471,12 +505,6 @@ func (s *Service) reconstructAndCacheConversation(ctx context.Context, ses *sess
 	}
 
 	summaryDiscordMessage := allDiscordMessages[0]
-	selfUser, err := ses.Me()
-	if err != nil {
-		s.logger.Error("Failed to get self user for reconstruction validation", zap.Error(err), zap.String("threadID", threadID.String()))
-		return nil, "", fmt.Errorf("failed to get self user: %w", err)
-	}
-
 	if summaryDiscordMessage.Author.ID != selfUser.ID {
 		s.logger.Warn("First message in reconstructed thread not from bot, not a managed thread.",
 			zap.String("threadID", threadID.String()),
@@ -487,9 +515,14 @@ func (s *Service) reconstructAndCacheConversation(ctx context.Context, ses *sess
 	}
 
 	content := summaryDiscordMessage.Content
+	initialUserDisplayName := defaultInitialUserName
 	if content == "" && summaryDiscordMessage.ReferencedMessage != nil {
 		s.logger.Debug("Summary message content is empty, using referenced message content", zap.String("threadID", threadID.String()))
 		content = summaryDiscordMessage.ReferencedMessage.Content
+		if summaryDiscordMessage.ReferencedMessage.Interaction != nil && summaryDiscordMessage.ReferencedMessage.Interaction.User.ID.IsValid() {
+			originalInteractionUser := summaryDiscordMessage.ReferencedMessage.Interaction.User
+			initialUserDisplayName = getUserDisplayName(originalInteractionUser)
+		}
 	}
 
 	promptMarker := "**Prompt:** "
@@ -551,7 +584,7 @@ func (s *Service) reconstructAndCacheConversation(ctx context.Context, ses *sess
 	)
 
 	history := []openai.ChatCompletionMessage{}
-	history = append(history, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: parsedUserPrompt}) // Name for the first user prompt might need to be derived if possible, or a generic one.
+	history = append(history, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: parsedUserPrompt, Name: sanitizeOpenAIName(initialUserDisplayName)})
 
 	for i := 1; i < len(allDiscordMessages); i++ {
 		msg := allDiscordMessages[i]
@@ -565,16 +598,20 @@ func (s *Service) reconstructAndCacheConversation(ctx context.Context, ses *sess
 		}
 
 		var role string
+		var name string
 		if msg.Author.ID == selfUser.ID {
 			role = openai.ChatMessageRoleAssistant
+			name = sanitizeOpenAIName(botDisplayName)
 		} else {
 			role = openai.ChatMessageRoleUser
+			messageAuthorDisplayName := getUserDisplayName(msg.Author)
+			name = sanitizeOpenAIName(messageAuthorDisplayName)
 		}
 		if strings.TrimSpace(msg.Content) == "" {
 			s.logger.Debug("Skipping empty message during history reconstruction", zap.String("threadID", threadID.String()), zap.String("messageID", msg.ID.String()))
 			continue
 		}
-		history = append(history, openai.ChatCompletionMessage{Role: role, Content: msg.Content})
+		history = append(history, openai.ChatCompletionMessage{Role: role, Content: msg.Content, Name: name})
 	}
 	s.logger.Debug("Reconstructed message history", zap.Int("count", len(history)), zap.String("threadID", threadID.String()))
 
@@ -590,4 +627,41 @@ func (s *Service) reconstructAndCacheConversation(ctx context.Context, ses *sess
 	)
 
 	return reconstructedCacheData, parsedModelName, nil
+}
+
+// getUserDisplayName returns the user's display name, or username if display name is empty.
+func getUserDisplayName(user discord.User) string {
+	if user.DisplayName != "" {
+		return user.DisplayName
+	}
+	return user.Username
+}
+
+// sanitizeOpenAIName ensures the name is valid for OpenAI.
+// OpenAI's spec: "May contain a-z, A-Z, 0-9, and underscores, with a maximum length of 64 characters."
+func sanitizeOpenAIName(name string) string {
+	if name == "" {
+		return defaultOpenAINameOnEmptyInput // Default for empty names
+	}
+
+	var sb strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			sb.WriteRune(r)
+		} else if r == '-' { // Convert hyphens to underscores
+			sb.WriteRune('_')
+		}
+		// Other invalid characters are skipped
+	}
+
+	sanitized := sb.String()
+	if sanitized == "" {
+		// If all characters were invalid, resulting in an empty string
+		sanitized = defaultOpenAINameIfSanitizedEmpty
+	}
+
+	if len(sanitized) > 64 {
+		return sanitized[:64]
+	}
+	return sanitized
 }

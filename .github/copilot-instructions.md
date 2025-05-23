@@ -35,9 +35,9 @@ This document provides instructions and context for GitHub Copilot to effectivel
 │   ├── bot/
 │   │   ├── bot.go          # Core bot service, handles startup/shutdown logic, interaction event routing.
 │   │   └── handlers.go     # Interaction event handlers (e.g., for slash commands).
-│   ├── chat/               # NEW: Service for handling chat logic
-│   │   ├── service.go      # NEW: Core chat service implementation.
-│   │   └── util.go         # NEW: Utility functions for the chat service.
+│   ├── chat/               # Service for handling chat logic
+│   │   ├── service.go      # Core chat service implementation.
+│   │   └── util.go         # Utility functions for the chat service: MakeThreadName (generates truncated thread titles from usernames/prompts) and SendLongMessage (splits long messages for Discord).
 │   ├── commands/
 │   │   ├── chat.go         # Implementation of the `/chat` command, which delegates to the `chat.Service`.
 │   │   ├── command_loader.go # CommandManager: loads commands from Fx, registers/unregisters with Discord.
@@ -49,7 +49,8 @@ This document provides instructions and context for GitHub Copilot to effectivel
 │   ├── config/
 │   │   └── config.go       # Configuration struct and loading logic.
 │   └── gpt/
-│       └── cache.go        # LRU Cache implementation for OpenAI messages.
+│       ├── cache.go        # LRU Cache implementation for OpenAI messages.
+│       └── negative_cache.go # Implements a negative cache, likely for GPT query results or error states.
 └── pkg/                    # (Currently empty) Intended for reusable library code.
 ```
 

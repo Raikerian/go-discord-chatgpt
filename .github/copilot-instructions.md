@@ -63,9 +63,9 @@ This document provides instructions and context for GitHub Copilot to effectivel
 
 2.  **Configuration Management**:
     *   Configuration is loaded from `config.yaml` into the `config.Config` struct ([`internal/config/config.go`](internal/config/config.go)).
-    *   This includes Discord settings (bot token, app ID, guild IDs, interaction timeout), OpenAI API key, model preferences, and message cache size.
+    *   This includes Discord settings (bot token, app ID, guild IDs, interaction timeout) and OpenAI settings (API key, preferred models, message cache size, negative thread cache size, max concurrent requests).
     *   The path to `config.yaml` is supplied to Fx in [`cmd/main.go`](cmd/main.go).
-    *   The `*config.Config` object is then available for injection into other components. For example, `discord.interaction_timeout_seconds` is used by the [`Bot`](internal/bot/bot.go) service and `openai.message_cache_size` configures the [`gpt.MessagesCache`](internal/gpt/cache.go).
+    *   The `*config.Config` object is then available for injection into other components. For example, `discord.interaction_timeout_seconds` is used by the [`Bot`](internal/bot/bot.go) service, `openai.message_cache_size` configures the [`gpt.MessagesCache`](internal/gpt/cache.go), and `openai.negative_thread_cache_size` configures the `gpt.NegativeThreadCache`.
 
 3.  **Logging**:
     *   Zap is used for structured logging.

@@ -102,6 +102,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 *   **Modularity**: Keep components decoupled and use Fx for wiring them together.
 *   **Interfaces**: Use interfaces (like `commands.Command`) to define contracts between components.
 *   **Structured Logging**: Use Zap for all logging. Provide context with logs where possible.
+*   **Commenting**: Avoid redundant and long comments. Only comment where necessary to explain complex logic or non-obvious decisions.
 *   **Error Handling**: Handle errors explicitly. Fx's lifecycle management will also report errors during startup/shutdown.
 *   **Configuration-Driven**: Make behavior configurable via [`config.yaml`](config.yaml) where appropriate (e.g., guild IDs, OpenAI models, cache size, interaction timeouts).
 *   **Go Best Practices**: Adhere to the guidelines outlined in [`golang.instructions.md`](.github/instructions/golang.instructions.md) for consistent and high-quality Go code.

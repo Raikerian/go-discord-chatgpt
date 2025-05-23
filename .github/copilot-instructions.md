@@ -104,6 +104,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 *   **Structured Logging**: Use Zap for all logging. Provide context with logs where possible.
 *   **Error Handling**: Handle errors explicitly. Fx's lifecycle management will also report errors during startup/shutdown.
 *   **Configuration-Driven**: Make behavior configurable via [`config.yaml`](config.yaml) where appropriate (e.g., guild IDs, OpenAI models, cache size, interaction timeouts).
+*   **Go Best Practices**: Adhere to the guidelines outlined in [`golang.instructions.md`](.github/instructions/golang.instructions.md) for consistent and high-quality Go code.
 *   **Testing**:
     *   Write unit tests for individual components and commands, focusing on public interfaces.
     *   Utilize the `testify` suite for assertions.

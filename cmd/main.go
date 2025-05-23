@@ -244,6 +244,27 @@ func resolveNegativeThreadCacheSize(cfg *config.Config, logger *zap.Logger) (int
 	return size, nil
 }
 
+// newConversationStoreProvider creates a ConversationStore with config-derived cache sizes.
+func newConversationStoreProvider(
+	logger *zap.Logger,
+	cfg *config.Config,
+	summaryParser chat.SummaryParser,
+) chat.ConversationStore {
+	messageCacheSize := cfg.OpenAI.MessageCacheSize
+	if messageCacheSize <= 0 {
+		logger.Warn("OpenAI MessageCacheSize is not configured or is invalid, defaulting to 100", zap.Int("configuredSize", messageCacheSize))
+		messageCacheSize = 100
+	}
+
+	negativeThreadCacheSize := cfg.OpenAI.NegativeThreadCacheSize
+	if negativeThreadCacheSize <= 0 {
+		logger.Warn("OpenAI NegativeThreadCacheSize is not configured or is invalid, defaulting to 1000", zap.Int("configuredSize", negativeThreadCacheSize))
+		negativeThreadCacheSize = 1000
+	}
+
+	return chat.NewConversationStore(logger, messageCacheSize, negativeThreadCacheSize, summaryParser)
+}
+
 // Module exports Fx providers for the main application.
 var Module = fx.Options(
 	fx.Provide(
@@ -283,7 +304,7 @@ var Module = fx.Options(
 		// Chat Service Components
 		chat.NewDiscordInteractionManager,
 		chat.NewOpenAIProvider,
-		chat.NewConversationStore,
+		newConversationStoreProvider,
 		chat.NewModelSelector,
 		chat.NewSummaryParser,
 

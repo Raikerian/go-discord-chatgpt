@@ -36,13 +36,26 @@ type ConversationStore interface {
 	IsInNegativeCache(threadID string) bool
 }
 
-// NewConversationStore creates a new ConversationStore implementation using the provided caches and summary parser.
+// NewConversationStore creates a new ConversationStore implementation with internal caches.
 func NewConversationStore(
 	logger *zap.Logger,
-	messagesCache *gpt.MessagesCache,
-	negativeThreadCache *gpt.NegativeThreadCache,
+	messageCacheSize int,
+	negativeThreadCacheSize int,
 	summaryParser SummaryParser,
 ) ConversationStore {
+	// Create caches directly using the LRU library
+	messagesCache, err := gpt.NewMessagesCache(gpt.MessagesCacheParams{Size: messageCacheSize})
+	if err != nil {
+		// This should not happen in practice since the only error case is negative size
+		logger.Panic("Failed to create messages cache", zap.Error(err))
+	}
+
+	negativeThreadCache, err := gpt.NewNegativeThreadCache(gpt.NegativeThreadCacheParams{Size: negativeThreadCacheSize})
+	if err != nil {
+		// This should not happen in practice since the only error case is negative size
+		logger.Panic("Failed to create negative thread cache", zap.Error(err))
+	}
+
 	return &cacheBasedConversationStore{
 		logger:              logger.Named("conversation_store"),
 		messagesCache:       messagesCache,

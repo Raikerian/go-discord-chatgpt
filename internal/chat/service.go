@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync" // Added for ongoingRequests
 	"time"
 
@@ -23,7 +24,9 @@ import (
 
 const (
 	// gptDiscordTypingIndicatorCooldownSeconds is the cooldown for sending typing indicators.
-	gptDiscordTypingIndicatorCooldownSeconds = 10
+	gptDiscordTypingIndicatorCooldownSeconds = 10 // Existing constant
+	// discordMessageFetchLimit is the limit for fetching messages in a single API call during history reconstruction.
+	discordMessageFetchLimit = 100
 )
 
 // Service handles the core logic for chat interactions.
@@ -293,59 +296,285 @@ func (s *Service) storeMessagesInCache(threadIDStr string, userPrompt, aiMessage
 
 // HandleThreadMessage handles messages sent in a thread that the bot is part of.
 func (s *Service) HandleThreadMessage(ctx context.Context, ses *session.Session, evt *gateway.MessageCreateEvent) error {
-	threadID := evt.ChannelID.String()
-	if _, found := s.negativeThreadCache.Get(threadID); found {
-		s.logger.Debug("Skipping message in thread not managed by us (negative cache hit)", zap.String("threadID", threadID))
-		return nil
-	}
-
-	cachedData, found := s.messagesCache.Get(threadID)
-	if !found {
-		s.logger.Debug("Skipping message in thread not managed by us (not in primary cache)", zap.String("threadID", threadID))
-		// Optionally, add to negative cache here if we are sure this thread isn't ours
-		// s.negativeThreadCache.Add(threadID, struct{}{})
-		return nil
-	}
-
-	s.logger.Info("Processing message in managed thread",
-		zap.String("threadID", threadID),
-		zap.String("userID", evt.Author.ID.String()),
-		zap.String("message", evt.Content),
+	s.logger.Info("Handling thread message",
+		zap.String("threadID", evt.ChannelID.String()),
+		zap.String("authorID", evt.Author.ID.String()),
+		zap.String("content", evt.Content),
 	)
+	threadIDStr := evt.ChannelID.String()
 
-	// Append the new user message to the history
+	// Negative Cache Check
+	if _, found := s.negativeThreadCache.Get(threadIDStr); found {
+		s.logger.Debug("Thread is in negative cache, ignoring message", zap.String("threadID", threadIDStr))
+		return nil
+	}
+
+	var modelToUse string
+	cachedData, found := s.messagesCache.Get(threadIDStr)
+
+	if found {
+		s.logger.Debug("Found conversation in primary cache", zap.String("threadID", threadIDStr))
+		modelToUse = cachedData.Model
+	} else {
+		s.logger.Info("Conversation not in cache, attempting to reconstruct", zap.String("threadID", threadIDStr))
+		reconstructedData, reconstructedModelName, err := s.reconstructAndCacheConversation(ctx, ses, evt.ChannelID)
+		if err != nil {
+			s.logger.Error("Failed to reconstruct conversation", zap.Error(err), zap.String("threadID", threadIDStr))
+			s.negativeThreadCache.Add(threadIDStr)
+			return nil
+		}
+		if reconstructedData == nil {
+			s.logger.Info("Thread not managed or initial message unparseable after reconstruction attempt", zap.String("threadID", threadIDStr))
+			s.negativeThreadCache.Add(threadIDStr)
+			return nil
+		}
+		cachedData = reconstructedData
+		modelToUse = reconstructedModelName
+	}
+
+	// Append the new user message
 	newUserMessage := openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
 		Content: evt.Content,
 	}
 	cachedData.Messages = append(cachedData.Messages, newUserMessage)
 
-	// TODO: Implement the full OpenAI call and response handling logic
-	// For now, we'll just log that we would make the call and update the cache stub.
-	s.logger.Info("Stub: Would call OpenAI with updated history",
-		zap.String("threadID", threadID),
+	// Manage Ongoing OpenAI Requests (Cancellation)
+	requestCtx, cancelCurrentRequest := context.WithCancel(ctx)
+	if existingCancel, loaded := s.ongoingRequests.LoadAndDelete(evt.ChannelID); loaded {
+		if cancelFunc, ok := existingCancel.(context.CancelFunc); ok {
+			s.logger.Info("Cancelling previous OpenAI request for thread", zap.String("threadID", threadIDStr))
+			cancelFunc()
+		}
+	}
+	s.ongoingRequests.Store(evt.ChannelID, cancelCurrentRequest)
+	defer s.ongoingRequests.Delete(evt.ChannelID)
+	defer cancelCurrentRequest() // Ensure this request's context is cancelled when done
+
+	// Interact with OpenAI
+	stopTyping := s.manageTypingIndicator(ses, evt.ChannelID)
+	defer func() { stopTyping <- true }()
+
+	aiRequest := openai.ChatCompletionRequest{
+		Model:    modelToUse,
+		Messages: cachedData.Messages,
+	}
+
+	s.logger.Info("Sending request to OpenAI for thread message",
+		zap.String("threadID", threadIDStr),
+		zap.String("model", modelToUse),
 		zap.Int("historyLength", len(cachedData.Messages)),
-		zap.String("model", cachedData.Model),
 	)
 
-	// Placeholder for AI response
-	aiResponseContent := "This is a stubbed AI response."
+	aiResponse, err := s.openaiClient.CreateChatCompletion(requestCtx, aiRequest)
 
-	// Append AI's (stubbed) response to history
+	if errors.Is(requestCtx.Err(), context.Canceled) {
+		s.logger.Info("OpenAI request was cancelled (likely by a newer message)", zap.String("threadID", threadIDStr))
+		return nil // Not an error to propagate, cancellation is an expected flow
+	}
+	if err != nil {
+		s.logger.Error("OpenAI completion failed for thread message", zap.Error(err), zap.String("threadID", threadIDStr))
+		errMsgToThread := "Sorry, I encountered an error trying to process your message. Please try again."
+		if sendErr := SendLongMessage(ses, evt.ChannelID, errMsgToThread); sendErr != nil {
+			s.logger.Error("Failed to send error message to thread after OpenAI failure", zap.Error(sendErr), zap.String("threadID", threadIDStr))
+		}
+		return fmt.Errorf("OpenAI completion failed: %w", err)
+	}
+
+	if len(aiResponse.Choices) == 0 || aiResponse.Choices[0].Message.Content == "" {
+		s.logger.Error("OpenAI returned no choices or empty message content", zap.String("threadID", threadIDStr))
+		errMsgToThread := "Sorry, I received an empty response from the AI. Please try again."
+		if sendErr := SendLongMessage(ses, evt.ChannelID, errMsgToThread); sendErr != nil {
+			s.logger.Error("Failed to send error message to thread for empty AI response", zap.Error(sendErr), zap.String("threadID", threadIDStr))
+		}
+		return errors.New("OpenAI returned no choices")
+	}
+
+	aiMessageContent := aiResponse.Choices[0].Message.Content
+	s.logger.Info("Received OpenAI response for thread message",
+		zap.String("threadID", threadIDStr),
+		zap.Int("promptTokens", aiResponse.Usage.PromptTokens),
+		zap.Int("completionTokens", aiResponse.Usage.CompletionTokens),
+	)
+
+	// Send Response to Discord
+	if err := SendLongMessage(ses, evt.ChannelID, aiMessageContent); err != nil {
+		s.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", threadIDStr))
+		// Don't return error, as AI call succeeded.
+	}
+
+	// Update Cache
 	aiMessage := openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleAssistant,
-		Content: aiResponseContent,
+		Content: aiMessageContent,
 	}
 	cachedData.Messages = append(cachedData.Messages, aiMessage)
+	s.messagesCache.Add(threadIDStr, cachedData)
 
-	// Update the cache with the new history
-	s.messagesCache.Add(threadID, cachedData)
-	s.logger.Info("Stub: Updated message cache with new user and AI (stubbed) messages", zap.String("threadID", threadID))
-
-	// TODO: Send the AI's actual response to the Discord thread
-	// For now, we'll just log that we would send a message.
-	s.logger.Info("Stub: Would send AI response to thread", zap.String("threadID", threadID), zap.String("response", aiResponseContent))
-	// Example: if err := SendLongMessage(ses, evt.ChannelID, aiResponseContent); err != nil { ... }
-
+	s.logger.Info("Successfully processed thread message and updated cache", zap.String("threadID", threadIDStr))
 	return nil
+}
+
+func (s *Service) reconstructAndCacheConversation(ctx context.Context, ses *session.Session, threadID discord.ChannelID) (cacheData *gpt.MessagesCacheData, modelName string, err error) {
+	s.logger.Info("Attempting to reconstruct conversation history for thread", zap.String("threadID", threadID.String()))
+
+	allDiscordMessages := make([]discord.Message, 0)
+	var oldestMessageIDInBatch discord.MessageID = 0 // Start with 0 to fetch the latest messages first in the first call.
+
+	for {
+		var batch []discord.Message
+		var fetchErr error
+
+		if oldestMessageIDInBatch == 0 { // First fetch
+			s.logger.Debug("Fetching initial message batch for reconstruction", zap.String("threadID", threadID.String()), zap.Uint("limit", discordMessageFetchLimit))
+			batch, fetchErr = ses.Messages(threadID, discordMessageFetchLimit)
+		} else { // Subsequent fetches, get messages before the oldest one from the previous batch
+			s.logger.Debug("Fetching older message batch for reconstruction", zap.String("threadID", threadID.String()), zap.Stringer("beforeID", oldestMessageIDInBatch), zap.Uint("limit", discordMessageFetchLimit))
+			batch, fetchErr = ses.MessagesBefore(threadID, oldestMessageIDInBatch, discordMessageFetchLimit)
+		}
+
+		if fetchErr != nil {
+			s.logger.Error("Failed to fetch messages during reconstruction", zap.Error(fetchErr), zap.String("threadID", threadID.String()))
+			return nil, "", fmt.Errorf("failed to fetch messages for reconstruction: %w", fetchErr)
+		}
+
+		if len(batch) == 0 {
+			s.logger.Debug("Fetched empty batch, assuming end of messages for reconstruction", zap.String("threadID", threadID.String()))
+			break
+		}
+		s.logger.Debug("Fetched message batch", zap.Int("count", len(batch)), zap.String("threadID", threadID.String()))
+
+		// Messages in batch are typically newest to oldest. We will reverse the whole list later.
+		allDiscordMessages = append(allDiscordMessages, batch...)
+		oldestMessageIDInBatch = batch[len(batch)-1].ID // The ID of the oldest message in the current batch.
+
+		// If we fetched fewer messages than the limit, we've likely reached the beginning of the thread.
+		if len(batch) < discordMessageFetchLimit {
+			s.logger.Debug("Fetched fewer messages than limit, assuming end of history.", zap.String("threadID", threadID.String()), zap.Int("fetchedCount", len(batch)))
+			break
+		}
+	}
+	s.logger.Info("Fetched all messages for reconstruction", zap.Int("totalMessages", len(allDiscordMessages)), zap.String("threadID", threadID.String()))
+
+	// Reverse messages to be in chronological order (oldest first)
+	for i, j := 0, len(allDiscordMessages)-1; i < j; i, j = i+1, j-1 {
+		allDiscordMessages[i], allDiscordMessages[j] = allDiscordMessages[j], allDiscordMessages[i]
+	}
+
+	if len(allDiscordMessages) == 0 {
+		s.logger.Warn("Thread is empty or unreadable during reconstruction", zap.String("threadID", threadID.String()))
+		return nil, "", nil // Not an error, but signals not our thread or unreadable
+	}
+
+	summaryDiscordMessage := allDiscordMessages[0]
+	selfUser, err := ses.Me()
+	if err != nil {
+		s.logger.Error("Failed to get self user for reconstruction validation", zap.Error(err), zap.String("threadID", threadID.String()))
+		return nil, "", fmt.Errorf("failed to get self user: %w", err)
+	}
+
+	if summaryDiscordMessage.Author.ID != selfUser.ID {
+		s.logger.Warn("First message in reconstructed thread not from bot, not a managed thread.",
+			zap.String("threadID", threadID.String()),
+			zap.String("firstMessageAuthorID", summaryDiscordMessage.Author.ID.String()),
+			zap.String("botID", selfUser.ID.String()),
+		)
+		return nil, "", nil
+	}
+
+	content := summaryDiscordMessage.Content
+	if content == "" && summaryDiscordMessage.ReferencedMessage != nil {
+		s.logger.Debug("Summary message content is empty, using referenced message content", zap.String("threadID", threadID.String()))
+		content = summaryDiscordMessage.ReferencedMessage.Content
+	}
+
+	promptMarker := "**Prompt:** "
+	modelMarker := "\n**Model:** " // Adjusted to expect newline before **Model:**
+	endOfModelMarker := "\n\nFuture messages"
+
+	promptStartIndex := strings.Index(content, promptMarker)
+	if promptStartIndex == -1 {
+		s.logger.Warn("Could not find 'Prompt:' marker in summary message", zap.String("threadID", threadID.String()), zap.String("content", content))
+		return nil, "", nil
+	}
+	// Actual start of the prompt text
+	actualPromptStartIndex := promptStartIndex + len(promptMarker)
+
+	// Find the start of the model line, which should be after the prompt text
+	modelLineStartIndex := strings.Index(content[actualPromptStartIndex:], modelMarker)
+	if modelLineStartIndex == -1 {
+		s.logger.Warn("Could not find 'Model:' marker after prompt in summary message", zap.String("threadID", threadID.String()), zap.String("substringSearched", content[actualPromptStartIndex:]))
+		return nil, "", nil
+	}
+	// modelLineStartIndex is relative to the substring content[actualPromptStartIndex:]. Adjust to be relative to content.
+	modelLineAbsoluteStartIndex := actualPromptStartIndex + modelLineStartIndex
+
+	// The prompt text is between actualPromptStartIndex and modelLineAbsoluteStartIndex
+	parsedUserPrompt := strings.TrimSpace(content[actualPromptStartIndex:modelLineAbsoluteStartIndex])
+
+	// Actual start of the model name text
+	actualModelNameStartIndex := modelLineAbsoluteStartIndex + len(modelMarker)
+
+	// Find the end of the model name (start of "Future messages" or end of line/string)
+	endOfModelNameIndex := strings.Index(content[actualModelNameStartIndex:], endOfModelMarker)
+	parsedModelName := ""
+	if endOfModelNameIndex != -1 {
+		// endOfModelNameIndex is relative to content[actualModelNameStartIndex:]. Adjust to be relative to content.
+		parsedModelName = strings.TrimSpace(content[actualModelNameStartIndex : actualModelNameStartIndex+endOfModelNameIndex])
+	} else {
+		// Fallback: if "Future messages" part is missing, try to read until end of line or string
+		nextLineBreakIndex := strings.Index(content[actualModelNameStartIndex:], "\n")
+		if nextLineBreakIndex != -1 {
+			parsedModelName = strings.TrimSpace(content[actualModelNameStartIndex : actualModelNameStartIndex+nextLineBreakIndex])
+		} else {
+			parsedModelName = strings.TrimSpace(content[actualModelNameStartIndex:]) // Take rest of string
+		}
+	}
+
+	if parsedUserPrompt == "" || parsedModelName == "" {
+		s.logger.Warn("Failed to parse user prompt or model name from summary message",
+			zap.String("threadID", threadID.String()),
+			zap.String("parsedPrompt", parsedUserPrompt),
+			zap.String("parsedModel", parsedModelName),
+			zap.String("summaryContent", content),
+		)
+		return nil, "", nil
+	}
+	s.logger.Info("Successfully parsed summary message",
+		zap.String("threadID", threadID.String()),
+		zap.String("parsedUserPrompt", parsedUserPrompt),
+		zap.String("parsedModelName", parsedModelName),
+	)
+
+	history := []openai.ChatCompletionMessage{}
+	history = append(history, openai.ChatCompletionMessage{Role: openai.ChatMessageRoleUser, Content: parsedUserPrompt})
+
+	for i := 1; i < len(allDiscordMessages); i++ {
+		msg := allDiscordMessages[i]
+		var role string
+		if msg.Author.ID == selfUser.ID {
+			role = openai.ChatMessageRoleAssistant
+		} else {
+			role = openai.ChatMessageRoleUser
+		}
+		if strings.TrimSpace(msg.Content) == "" {
+			s.logger.Debug("Skipping empty message during history reconstruction", zap.String("threadID", threadID.String()), zap.String("messageID", msg.ID.String()))
+			continue
+		}
+		history = append(history, openai.ChatCompletionMessage{Role: role, Content: msg.Content})
+	}
+	s.logger.Debug("Reconstructed message history", zap.Int("count", len(history)), zap.String("threadID", threadID.String()))
+
+	reconstructedCacheData := &gpt.MessagesCacheData{
+		Messages: history,
+		Model:    parsedModelName,
+	}
+	s.messagesCache.Add(threadID.String(), reconstructedCacheData)
+	s.logger.Info("Successfully reconstructed and cached conversation",
+		zap.String("threadID", threadID.String()),
+		zap.String("model", parsedModelName),
+		zap.Int("historyLength", len(history)),
+	)
+
+	return reconstructedCacheData, parsedModelName, nil
 }

@@ -14,6 +14,53 @@ import (
 	"go.uber.org/zap"
 )
 
+// handleMessageCreate handles incoming messages, specifically for thread interactions.
+// It is called by the event handler in the Bot struct.
+func (b *Bot) handleMessageCreate(ctx context.Context, s *session.Session, e *gateway.MessageCreateEvent) {
+	// Ignore bot's own messages
+	selfUser, err := s.Me()
+	if err != nil {
+		b.Logger.Error("Failed to get self user information", zap.Error(err))
+		return
+	}
+	if e.Author.ID == selfUser.ID {
+		return
+	}
+
+	// Check if the message is in a thread by fetching channel info
+	ch, err := s.Channel(e.ChannelID) // Use the session from the event handler context
+	if err != nil {
+		b.Logger.Warn("Failed to fetch channel info for MessageCreateEvent", zap.Error(err), zap.String("channelID", e.ChannelID.String()))
+		return
+	}
+
+	// Use discord.GuildAnnouncementThread as discord.GuildNewsThread is deprecated.
+	isThread := ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread
+	if !isThread {
+		b.Logger.Debug("Message is not in a thread, ignoring", zap.String("messageID", e.ID.String()))
+		return
+	}
+
+	b.Logger.Info("Received message in a thread",
+		zap.String("threadID", e.ChannelID.String()),
+		zap.String("authorID", e.Author.ID.String()),
+		zap.String("content", e.Content),
+	)
+
+	// Delegate to chat.Service
+	if b.ChatService == nil {
+		b.Logger.Error("Chat service is not initialized in Bot, cannot handle thread message")
+		return
+	}
+
+	if err := b.ChatService.HandleThreadMessage(ctx, s, e); err != nil {
+		b.Logger.Error("Error handling thread message via chat service",
+			zap.Error(err),
+			zap.String("threadID", e.ChannelID.String()),
+		)
+	}
+}
+
 func handleInteraction(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, logger *zap.Logger, cmdManager *commands.CommandManager) {
 	// Check if it's a slash command
 	switch data := e.Data.(type) {

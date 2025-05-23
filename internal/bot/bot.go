@@ -104,27 +104,8 @@ func (b *Bot) Start(ctx context.Context) error {
 		if e.Author.Bot {
 			return
 		}
-
-		// Check if the message is in a thread by fetching channel info
-		ch, err := b.Session.Channel(e.ChannelID)
-		if err != nil {
-			b.Logger.Warn("Failed to fetch channel info for MessageCreateEvent", zap.Error(err), zap.String("channelID", e.ChannelID.String()))
-			return
-		}
-
-		isThread := ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread // Corrected deprecated constant
-		if !isThread {
-			return
-		}
-
-		// Forward to chat service
-		if err := b.ChatService.HandleThreadMessage(context.Background(), b.Session, e); err != nil {
-			b.Logger.Error("Error handling thread message",
-				zap.Error(err),
-				zap.String("threadID", e.ChannelID.String()),
-				zap.String("messageID", e.ID.String()),
-			)
-		}
+		// Create a new context for each message.
+		b.handleMessageCreate(context.Background(), b.Session, e)
 	})
 	b.Logger.Info("InteractionCreateEvent and MessageCreateEvent handlers added to session.")
 

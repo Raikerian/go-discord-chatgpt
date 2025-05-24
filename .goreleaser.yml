@@ -30,8 +30,8 @@ builds:
 dockers:
   - image_templates:
       # Use commit SHA for snapshots, semantic version for releases
-      - "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY | lower }}:{{ .ShortCommit }}{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY | lower }}:{{ .Version }}{{ end }}"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY | lower }}:latest"
+      - "{{ if .IsSnapshot }}ghcr.io/raikerian/go-discord-chatgpt:{{ .ShortCommit }}{{ else }}ghcr.io/raikerian/go-discord-chatgpt:{{ .Version }}{{ end }}"
+      - "ghcr.io/raikerian/go-discord-chatgpt:latest"
     dockerfile: Dockerfile.goreleaser
     use: buildx
     build_flag_templates:

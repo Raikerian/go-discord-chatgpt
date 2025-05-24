@@ -2,7 +2,7 @@ package bot
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"time"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/chat"
@@ -26,7 +26,7 @@ type Bot struct {
 	ChatService *chat.Service
 }
 
-// NewBotParameters holds dependencies for NewBot
+// NewBotParameters holds dependencies for NewBot.
 type NewBotParameters struct {
 	fx.In // Required by Fx
 
@@ -41,22 +41,22 @@ type NewBotParameters struct {
 // The session, logger, and chat service are now injected by Fx.
 func NewBot(params NewBotParameters) (*Bot, error) {
 	if params.S == nil {
-		return nil, fmt.Errorf("session provided to NewBot is nil")
+		return nil, errors.New("session provided to NewBot is nil")
 	}
 	if params.Cfg == nil {
-		return nil, fmt.Errorf("config provided to NewBot is nil")
+		return nil, errors.New("config provided to NewBot is nil")
 	}
 	if params.Logger == nil {
-		return nil, fmt.Errorf("logger provided to NewBot is nil")
+		return nil, errors.New("logger provided to NewBot is nil")
 	}
 	if params.CmdManager == nil {
-		return nil, fmt.Errorf("command manager provided to NewBot is nil")
+		return nil, errors.New("command manager provided to NewBot is nil")
 	}
 	if params.ChatSvc == nil {
-		return nil, fmt.Errorf("chat service provided to NewBot is nil")
+		return nil, errors.New("chat service provided to NewBot is nil")
 	}
 	if params.Cfg.Discord.ApplicationID == nil || *params.Cfg.Discord.ApplicationID == 0 {
-		return nil, fmt.Errorf("application ID is not set or is zero in config")
+		return nil, errors.New("application ID is not set or is zero in config")
 	}
 
 	b := &Bot{
@@ -68,6 +68,7 @@ func NewBot(params NewBotParameters) (*Bot, error) {
 	}
 
 	params.Logger.Info("NewBot created successfully. Handler registration will occur in Start.")
+
 	return b, nil
 }
 
@@ -115,7 +116,8 @@ func (b *Bot) Start(ctx context.Context) error {
 	// Ensure CmdManager is initialized
 	if b.CmdManager == nil {
 		b.Logger.Error("Command manager is not initialized in Bot")
-		return fmt.Errorf("command manager is not initialized in Bot")
+
+		return errors.New("command manager is not initialized in Bot")
 	}
 
 	var guildIDs []discord.GuildID
@@ -124,6 +126,7 @@ func (b *Bot) Start(ctx context.Context) error {
 			sf, err := discord.ParseSnowflake(idStr)
 			if err != nil {
 				b.Logger.Error("Failed to parse guild ID string to Snowflake", zap.String("guildIDStr", idStr), zap.Error(err))
+
 				continue // Skip invalid IDs
 			}
 			guildIDs = append(guildIDs, discord.GuildID(sf))
@@ -154,6 +157,7 @@ func (b *Bot) Stop(ctx context.Context) error {
 			sf, err := discord.ParseSnowflake(idStr)
 			if err != nil {
 				b.Logger.Error("Failed to parse guild ID string to Snowflake for unregistering", zap.String("guildIDStr", idStr), zap.Error(err))
+
 				continue
 			}
 			guildIDs = append(guildIDs, discord.GuildID(sf))
@@ -164,5 +168,6 @@ func (b *Bot) Stop(ctx context.Context) error {
 	}
 
 	b.Logger.Info("Bot stopped.")
+
 	return nil
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -24,7 +25,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// zapFxPrinter adapts a zap.SugaredLogger to fx.Printer interface
+// zapFxPrinter adapts a zap.SugaredLogger to fx.Printer interface.
 type zapFxPrinter struct {
 	logger *zap.SugaredLogger
 }
@@ -99,13 +100,13 @@ func (p *zapFxPrinter) LogEvent(event fxevent.Event) {
 	}
 }
 
-// Printf implements fx.Printer
+// Printf implements fx.Printer.
 func (p *zapFxPrinter) Printf(format string, args ...interface{}) {
 	// Fx's own messages. Info is usually fine.
 	p.logger.Infof(format, args...)
 }
 
-// NewZapLoggerParameters holds dependencies for NewZapLogger
+// NewZapLoggerParameters holds dependencies for NewZapLogger.
 type NewZapLoggerParameters struct {
 	fx.In
 	Cfg *config.Config
@@ -153,14 +154,16 @@ func NewOpenAIClient(cfg *config.Config, logger *zap.Logger) (*openai.Client, er
 		// It's better to return an error if the API key is missing,
 		// allowing Fx to handle the startup failure gracefully.
 		logger.Error("OpenAI API key is not configured in config.yaml")
-		return nil, fmt.Errorf("OpenAI API key (config.OpenAI.APIKey) is not configured")
+
+		return nil, errors.New("OpenAI API key (config.OpenAI.APIKey) is not configured")
 	}
 	client := openai.NewClient(cfg.OpenAI.APIKey)
 	logger.Info("OpenAI client created successfully.")
+
 	return client, nil
 }
 
-// NewSessionParameters holds dependencies for NewSession
+// NewSessionParameters holds dependencies for NewSession.
 type NewSessionParameters struct {
 	fx.In
 	Cfg    *config.Config
@@ -168,7 +171,7 @@ type NewSessionParameters struct {
 	Logger *zap.Logger
 }
 
-// NewSessionResult holds results from NewSession
+// NewSessionResult holds results from NewSession.
 type NewSessionResult struct {
 	fx.Out
 	Session *session.Session
@@ -179,11 +182,11 @@ type NewSessionResult struct {
 // The session's Open and Close methods are tied to the Fx lifecycle.
 func NewSession(params NewSessionParameters) (NewSessionResult, error) {
 	if params.Cfg.Discord.BotToken == "" {
-		return NewSessionResult{}, fmt.Errorf("discord bot token is not set in config")
+		return NewSessionResult{}, errors.New("discord bot token is not set in config")
 	}
 
 	if params.Cfg.Discord.ApplicationID == nil {
-		return NewSessionResult{}, fmt.Errorf("application ID is not set in config")
+		return NewSessionResult{}, errors.New("application ID is not set in config")
 	}
 
 	s := session.New("Bot " + params.Cfg.Discord.BotToken)
@@ -203,6 +206,7 @@ func NewSession(params NewSessionParameters) (NewSessionResult, error) {
 		},
 		OnStop: func(ctx context.Context) error {
 			params.Logger.Info("Closing Discord session...")
+
 			return s.Close()
 		},
 	})
@@ -215,10 +219,12 @@ func NewSession(params NewSessionParameters) (NewSessionResult, error) {
 func provideDiscordAppID(cfg *config.Config, logger *zap.Logger) (discord.AppID, error) {
 	if cfg.Discord.ApplicationID == nil || *cfg.Discord.ApplicationID == 0 {
 		logger.Error("Application ID is not configured or is invalid in config")
-		return 0, fmt.Errorf("application ID is not configured or is invalid")
+
+		return 0, errors.New("application ID is not configured or is invalid")
 	}
 	appID := discord.AppID(*cfg.Discord.ApplicationID)
 	logger.Info("Providing Discord AppID", zap.Stringer("appID", appID))
+
 	return appID, nil
 }
 
@@ -230,6 +236,7 @@ func resolveMessageCacheSize(cfg *config.Config, logger *zap.Logger) (int, error
 		size = 100 // Default to a sensible value if not configured or invalid
 	}
 	logger.Info("Providing OpenAI MessageCacheSize", zap.Int("size", size))
+
 	return size, nil
 }
 
@@ -241,6 +248,7 @@ func resolveNegativeThreadCacheSize(cfg *config.Config, logger *zap.Logger) (int
 		size = 1000 // Default to a sensible value if not configured or invalid
 	}
 	logger.Info("Providing OpenAI NegativeThreadCacheSize", zap.Int("size", size))
+
 	return size, nil
 }
 
@@ -345,18 +353,22 @@ var Module = fx.Options(
 				// Start the bot, which includes registering commands
 				if err := b.Start(ctx); err != nil {
 					logger.Error("Failed to start bot", zap.Error(err))
+
 					return err
 				}
 				logger.Info("Bot started successfully via Fx OnStart hook.")
+
 				return nil
 			},
 			OnStop: func(ctx context.Context) error {
 				logger.Info("Executing OnStop hook: Stopping bot and unregistering commands.")
 				if err := b.Stop(ctx); err != nil {
 					logger.Error("Failed to stop bot", zap.Error(err))
+
 					return err
 				}
 				logger.Info("Bot stopped successfully via Fx OnStop hook.")
+
 				return nil
 			},
 		})

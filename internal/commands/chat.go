@@ -74,6 +74,7 @@ func (c *ChatCommand) Options() []discord.CommandOption {
 			Choices:     modelChoices,
 		})
 	}
+
 	return baseOptions
 }
 
@@ -110,6 +111,7 @@ func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 		if err := s.RespondInteraction(e.ID, e.Token, resp); err != nil {
 			c.logger.Error("Failed to send ephemeral error for empty prompt", zap.Error(err))
 		}
+
 		return errors.New("prompt is empty") // Return error to stop further processing
 	}
 
@@ -127,6 +129,7 @@ func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 		if err := s.RespondInteraction(e.ID, e.Token, resp); err != nil {
 			c.logger.Error("Failed to send ephemeral error for no models configured", zap.Error(err))
 		}
+
 		return errors.New("no openai models configured") // Return error to stop further processing
 	}
 
@@ -153,5 +156,6 @@ func (c *ChatCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 	}
 
 	c.logger.Info("Chat command execution successfully delegated to chat service", zap.String("user", e.Member.User.Username))
+
 	return nil
 }

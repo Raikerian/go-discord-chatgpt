@@ -3,8 +3,9 @@ package chat
 import (
 	"errors"
 
-	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"go.uber.org/zap"
+
+	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 )
 
 // ModelSelector defines the interface for selecting an AI model.
@@ -43,6 +44,7 @@ func (cms *configModelSelector) SelectModel(userPreference string) (string, erro
 		for _, configuredModel := range cms.cfg.OpenAI.Models {
 			if userPreference == configuredModel {
 				cms.logger.Debug("Using user-specified model", zap.String("model", userPreference))
+
 				return userPreference, nil
 			}
 		}
@@ -54,5 +56,6 @@ func (cms *configModelSelector) SelectModel(userPreference string) (string, erro
 
 	defaultModel := cms.cfg.OpenAI.Models[0]
 	cms.logger.Debug("Using default model", zap.String("model", defaultModel))
+
 	return defaultModel, nil // Default to the first configured model
 }

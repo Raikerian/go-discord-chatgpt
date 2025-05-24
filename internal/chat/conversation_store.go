@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/session"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
+
+	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
 )
 
 const (
@@ -147,11 +148,13 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 
 		if fetchErr != nil {
 			cs.logger.Error("Failed to fetch messages during reconstruction", zap.Error(fetchErr), zap.String("threadID", threadID.String()))
+
 			return nil, "", fmt.Errorf("failed to fetch messages for reconstruction: %w", fetchErr)
 		}
 
 		if len(batch) == 0 {
 			cs.logger.Debug("Fetched empty batch, assuming end of messages for reconstruction", zap.String("threadID", threadID.String()))
+
 			break
 		}
 		cs.logger.Debug("Fetched message batch", zap.Int("count", len(batch)), zap.String("threadID", threadID.String()))
@@ -163,6 +166,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 		// If we fetched fewer messages than the limit, we've likely reached the beginning of the thread.
 		if len(batch) < discordMessageFetchLimit {
 			cs.logger.Debug("Fetched fewer messages than limit, assuming end of history.", zap.String("threadID", threadID.String()), zap.Int("fetchedCount", len(batch)))
+
 			break
 		}
 	}
@@ -175,6 +179,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 
 	if len(allDiscordMessages) == 0 {
 		cs.logger.Warn("Thread is empty or unreadable during reconstruction", zap.String("threadID", threadID.String()))
+
 		return nil, "", nil // Not an error, but signals not our thread or unreadable
 	}
 
@@ -185,6 +190,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 			zap.String("firstMessageAuthorID", summaryDiscordMessage.Author.ID.String()),
 			zap.String("botID", selfUser.ID.String()),
 		)
+
 		return nil, "", nil
 	}
 
@@ -197,6 +203,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 	)
 	if err != nil {
 		cs.logger.Warn("Failed to parse summary message", zap.Error(err), zap.String("threadID", threadID.String()))
+
 		return nil, "", nil
 	}
 
@@ -211,6 +218,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 			cs.logger.Debug("Skipping current incoming message during history reconstruction",
 				zap.String("threadID", threadID.String()),
 				zap.String("messageID", msg.ID.String()))
+
 			continue
 		}
 
@@ -226,6 +234,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 		}
 		if strings.TrimSpace(msg.Content) == "" {
 			cs.logger.Debug("Skipping empty message during history reconstruction", zap.String("threadID", threadID.String()), zap.String("messageID", msg.ID.String()))
+
 			continue
 		}
 		history = append(history, openai.ChatCompletionMessage{Role: role, Content: msg.Content, Name: name})
@@ -255,5 +264,6 @@ func (cs *cacheBasedConversationStore) AddToNegativeCache(threadID string) {
 // IsInNegativeCache checks if a thread is in the negative cache.
 func (cs *cacheBasedConversationStore) IsInNegativeCache(threadID string) bool {
 	_, found := cs.negativeThreadCache.Get(threadID)
+
 	return found
 }

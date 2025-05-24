@@ -36,7 +36,6 @@ func (csp *chatSummaryParser) ParseInitialMessage(
 	defaultInitialUserName string,
 	userDisplayNameResolver func(user discord.User) string,
 ) (parsedUserPrompt, parsedModelName, initialUserName string, err error) {
-
 	initialUserDisplayName := defaultInitialUserName
 
 	// Check if we need to use referenced message content
@@ -57,6 +56,7 @@ func (csp *chatSummaryParser) ParseInitialMessage(
 	promptStartIndex := strings.Index(content, promptMarker)
 	if promptStartIndex == -1 {
 		csp.logger.Warn("Could not find 'Prompt:' marker in summary message", zap.String("content", content))
+
 		return "", "", "", errors.New("could not find prompt marker")
 	}
 	// Actual start of the prompt text
@@ -66,6 +66,7 @@ func (csp *chatSummaryParser) ParseInitialMessage(
 	modelLineStartIndex := strings.Index(content[actualPromptStartIndex:], modelMarker)
 	if modelLineStartIndex == -1 {
 		csp.logger.Warn("Could not find 'Model:' marker after prompt in summary message", zap.String("substringSearched", content[actualPromptStartIndex:]))
+
 		return "", "", "", errors.New("could not find model marker")
 	}
 	// modelLineStartIndex is relative to the substring content[actualPromptStartIndex:]. Adjust to be relative to content.
@@ -98,6 +99,7 @@ func (csp *chatSummaryParser) ParseInitialMessage(
 			zap.String("parsedModel", parsedModelName),
 			zap.String("summaryContent", content),
 		)
+
 		return "", "", "", errors.New("failed to parse prompt or model from summary")
 	}
 

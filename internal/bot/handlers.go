@@ -21,6 +21,7 @@ func (b *Bot) handleMessageCreate(ctx context.Context, s *session.Session, e *ga
 	selfUser, err := s.Me()
 	if err != nil {
 		b.Logger.Error("Failed to get self user information", zap.Error(err))
+
 		return
 	}
 	if e.Author.ID == selfUser.ID {
@@ -31,6 +32,7 @@ func (b *Bot) handleMessageCreate(ctx context.Context, s *session.Session, e *ga
 	ch, err := s.Channel(e.ChannelID) // Use the session from the event handler context
 	if err != nil {
 		b.Logger.Warn("Failed to fetch channel info for MessageCreateEvent", zap.Error(err), zap.String("channelID", e.ChannelID.String()))
+
 		return
 	}
 
@@ -38,6 +40,7 @@ func (b *Bot) handleMessageCreate(ctx context.Context, s *session.Session, e *ga
 	isThread := ch.Type == discord.GuildPublicThread || ch.Type == discord.GuildPrivateThread || ch.Type == discord.GuildAnnouncementThread
 	if !isThread {
 		b.Logger.Debug("Message is not in a thread, ignoring", zap.String("messageID", e.ID.String()))
+
 		return
 	}
 
@@ -50,6 +53,7 @@ func (b *Bot) handleMessageCreate(ctx context.Context, s *session.Session, e *ga
 	// Delegate to chat.Service
 	if b.ChatService == nil {
 		b.Logger.Error("Chat service is not initialized in Bot, cannot handle thread message")
+
 		return
 	}
 
@@ -81,6 +85,7 @@ func handleInteraction(ctx context.Context, s *session.Session, e *gateway.Inter
 			if err != nil {
 				logger.Error("Failed to respond to interaction for unknown command", zap.Error(err))
 			}
+
 			return
 		}
 

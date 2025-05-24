@@ -59,14 +59,17 @@ func (dim *discordInteractionManagerImpl) SendInitialResponse(ses *session.Sessi
 		if followUpErr != nil {
 			dim.logger.Error("Failed to send error follow-up for initial response failure", zap.Error(followUpErr))
 		}
+
 		return nil, fmt.Errorf("failed to send initial interaction response: %w", err)
 	}
 
 	originalMessage, err := ses.InteractionResponse(appID, eventToken)
 	if err != nil {
 		dim.logger.Error("Failed to get the initial interaction response message", zap.Error(err))
+
 		return nil, fmt.Errorf("failed to get interaction response message: %w", err)
 	}
+
 	return originalMessage, nil
 }
 
@@ -86,15 +89,17 @@ func (dim *discordInteractionManagerImpl) CreateThreadForInteraction(ses *sessio
 	newThread, err := ses.StartThreadWithMessage(originalMessage.ChannelID, originalMessage.ID, threadCreateAPIData)
 	if err != nil {
 		dim.logger.Error("Failed to create thread from message", zap.Error(err))
-		errMsgContent := fmt.Sprintf("%s\n\n**(Sorry, I couldn't create a discussion thread for this chat. Please try again or contact an administrator if the issue persists.)**", originalSummaryMessageForFallback)
+		errMsgContent := originalSummaryMessageForFallback + "\n\n**(Sorry, I couldn't create a discussion thread for this chat. Please try again or contact an administrator if the issue persists.)**"
 		_, editErr := ses.EditInteractionResponse(appID, eventToken, api.EditInteractionResponseData{
 			Content: option.NewNullableString(errMsgContent),
 		})
 		if editErr != nil {
 			dim.logger.Error("Failed to edit interaction response to indicate thread creation failure", zap.Error(editErr))
 		}
+
 		return nil, fmt.Errorf("failed to create thread from message: %w", err)
 	}
+
 	return newThread, nil
 }
 

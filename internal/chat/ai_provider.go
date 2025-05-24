@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
+
+	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 )
 
 // AIProvider defines the interface for interacting with an AI chat completion service.
@@ -44,11 +45,13 @@ func (oai *openAIProvider) GetChatCompletion(ctx context.Context, model string, 
 	aiResponse, err := oai.client.CreateChatCompletion(ctx, aiRequest)
 	if err != nil {
 		oai.logger.Error("Failed to get response from OpenAI", zap.Error(err))
+
 		return nil, err
 	}
 
 	if len(aiResponse.Choices) == 0 || aiResponse.Choices[0].Message.Content == "" {
 		oai.logger.Warn("OpenAI returned an empty response", zap.Any("aiResponse", aiResponse))
+
 		return nil, errors.New("OpenAI returned empty response")
 	}
 

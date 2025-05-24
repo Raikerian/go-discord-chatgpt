@@ -36,7 +36,8 @@ func (ntc *NegativeThreadCache) Add(threadID string) {
 
 // Contains checks if a thread ID is in the cache.
 func (ntc *NegativeThreadCache) Contains(threadID string) bool {
-	_, ok := ntc.Cache.Get(threadID)
+	_, ok := ntc.Get(threadID)
+
 	return ok
 }
 

@@ -60,6 +60,7 @@ func NewService(
 // getOrCreateThreadMutex returns a mutex for the given thread to ensure sequential processing.
 func (s *Service) getOrCreateThreadMutex(channelID discord.ChannelID) *sync.Mutex {
 	mutex, _ := s.threadMutexes.LoadOrStore(channelID, &sync.Mutex{})
+
 	return mutex.(*sync.Mutex)
 }
 
@@ -74,12 +75,14 @@ func (s *Service) HandleChatInteraction(ctx context.Context, e *gateway.Interact
 
 	if userPrompt == "" {
 		s.logger.Warn("User prompt is empty in service layer")
+
 		return errors.New("prompt is empty")
 	}
 
 	modelToUse, err := s.modelSelector.SelectModel(modelOption)
 	if err != nil {
 		s.logger.Error("Failed to determine model", zap.Error(err))
+
 		return err
 	}
 	s.logger.Info("Determined model for chat", zap.String("modelToUse", modelToUse))
@@ -136,6 +139,7 @@ func (s *Service) HandleChatInteraction(ctx context.Context, e *gateway.Interact
 		if sendErr := s.interactionManager.SendMessage(s.ses, newThread.ID, errMsgToThread); sendErr != nil {
 			s.logger.Error("Failed to send error message to thread after OpenAI failure", zap.Error(sendErr), zap.String("threadID", newThread.ID.String()))
 		}
+
 		return err
 	}
 
@@ -148,6 +152,7 @@ func (s *Service) HandleChatInteraction(ctx context.Context, e *gateway.Interact
 	s.conversationStore.StoreInitialConversation(newThread.ID.String(), userPrompt, aiMessageContent, modelToUse, userDisplayName, botDisplayName, SanitizeOpenAIName)
 
 	s.logger.Info("Chat interaction processing completed successfully", zap.String("threadID", newThread.ID.String()))
+
 	return nil
 }
 
@@ -165,7 +170,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 	// 1. IMMEDIATE CANCELLATION (no lock needed for sync.Map)
 	if existingCancel, loaded := s.ongoingRequests.LoadAndDelete(evt.ChannelID); loaded {
 		if cancelFunc, ok := existingCancel.(context.CancelFunc); ok {
-			s.logger.Info("Cancelling previous OpenAI request for thread",
+			s.logger.Info("Canceling previous OpenAI request for thread",
 				zap.String("threadID", evt.ChannelID.String()))
 			cancelFunc() // Previous request should return quickly
 		}
@@ -187,6 +192,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 	// Negative Cache Check
 	if s.conversationStore.IsInNegativeCache(threadIDStr) {
 		s.logger.Debug("Thread is in negative cache, ignoring message", zap.String("threadID", threadIDStr))
+
 		return nil
 	}
 
@@ -202,6 +208,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		if err != nil {
 			s.logger.Error("Failed to get self user for reconstruction", zap.Error(err), zap.String("threadID", threadIDStr))
 			s.conversationStore.AddToNegativeCache(threadIDStr)
+
 			return nil
 		}
 		botDisplayName, err := s.getBotDisplayName()
@@ -216,11 +223,13 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		if err != nil {
 			s.logger.Error("Failed to reconstruct conversation", zap.Error(err), zap.String("threadID", threadIDStr))
 			s.conversationStore.AddToNegativeCache(threadIDStr)
+
 			return nil
 		}
 		if reconstructedData == nil {
 			s.logger.Info("Thread not managed or initial message unparseable after reconstruction attempt, adding to negative cache.", zap.String("threadID", threadIDStr))
 			s.conversationStore.AddToNegativeCache(threadIDStr)
+
 			return nil
 		}
 		cachedData = reconstructedData
@@ -245,7 +254,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		zap.String("userMessage", evt.Content),
 		zap.Int("totalMessages", len(messages)))
 
-	// 5. Send to OpenAI (this should return quickly if cancelled)
+	// 5. Send to OpenAI (this should return quickly if canceled)
 	stopTyping := s.interactionManager.StartTypingIndicator(s.ses, evt.ChannelID)
 	defer stopTyping()
 
@@ -259,8 +268,9 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 
 	// Handle cancellation
 	if errors.Is(requestCtx.Err(), context.Canceled) {
-		s.logger.Info("OpenAI request was cancelled, user message preserved in cache",
+		s.logger.Info("OpenAI request was canceled, user message preserved in cache",
 			zap.String("threadID", threadIDStr))
+
 		return nil // User message already cached, lock will be released by defer
 	}
 
@@ -272,6 +282,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, errMsg); sendErr != nil {
 			s.logger.Error("Failed to send error message", zap.Error(sendErr))
 		}
+
 		return fmt.Errorf("OpenAI completion failed: %w", err) // User message preserved
 	}
 
@@ -282,6 +293,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, errMsgToThread); sendErr != nil {
 			s.logger.Error("Failed to send error message to thread for empty AI response", zap.Error(sendErr), zap.String("threadID", threadIDStr))
 		}
+
 		return errors.New("OpenAI returned no choices") // User message preserved
 	}
 
@@ -302,6 +314,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 	if !found {
 		s.logger.Warn("Conversation cache was evicted during OpenAI request, AI response not cached",
 			zap.String("threadID", threadIDStr))
+
 		return nil // User message already cached, graceful degradation
 	}
 
@@ -331,8 +344,10 @@ func (s *Service) getBotDisplayName() (string, error) {
 	botUser, err := s.ses.Me()
 	if err != nil {
 		s.logger.Error("Failed to get bot user for display name", zap.Error(err))
+
 		return defaultBotName, err
 	}
+
 	return GetUserDisplayName(*botUser), nil
 }
 
@@ -341,5 +356,6 @@ func (s *Service) getSelfUser() (*discord.User, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	return self, nil
 }

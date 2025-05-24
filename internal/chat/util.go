@@ -22,11 +22,12 @@ func GetUserDisplayName(user discord.User) string {
 	if user.DisplayName != "" {
 		return user.DisplayName
 	}
+
 	return user.Username
 }
 
 // SanitizeOpenAIName ensures the name is valid for OpenAI.
-// OpenAI's spec: "May contain a-z, A-Z, 0-9, and underscores, with a maximum length of 64 characters."
+// OpenAI's spec: "May contain a-z, A-Z, 0-9, and underscores, with a maximum length of 64 characters.".
 func SanitizeOpenAIName(name string) string {
 	if name == "" {
 		return defaultOpenAINameOnEmptyInput // Default for empty names
@@ -51,6 +52,7 @@ func SanitizeOpenAIName(name string) string {
 	if len(sanitized) > 64 {
 		return sanitized[:64]
 	}
+
 	return sanitized
 }
 
@@ -69,8 +71,10 @@ func MakeThreadName(username, prompt string, maxLength int) string {
 			if maxLength <= 3 {
 				return prefix[:maxLength]
 			}
+
 			return prefix[:maxLength-3] + "..."
 		}
+
 		return prefix
 	}
 
@@ -91,8 +95,10 @@ func MakeThreadName(username, prompt string, maxLength int) string {
 		if maxLength <= 3 {
 			return name[:maxLength]
 		}
+
 		return name[:maxLength-3] + "..."
 	}
+
 	return name
 }
 
@@ -100,7 +106,8 @@ func MakeThreadName(username, prompt string, maxLength int) string {
 // if it exceeds discordMaxMessageLength.
 func SendLongMessage(s *session.Session, channelID discord.ChannelID, content string) error {
 	if len(content) <= discordMaxMessageLength {
-		_, err := s.Client.SendMessageComplex(channelID, api.SendMessageData{Content: content})
+		_, err := s.SendMessageComplex(channelID, api.SendMessageData{Content: content})
+
 		return err
 	}
 
@@ -109,6 +116,7 @@ func SendLongMessage(s *session.Session, channelID discord.ChannelID, content st
 	for len(remainingContent) > 0 {
 		if len(remainingContent) <= discordMaxMessageLength {
 			parts = append(parts, remainingContent)
+
 			break
 		}
 
@@ -135,10 +143,11 @@ func SendLongMessage(s *session.Session, channelID discord.ChannelID, content st
 		if strings.TrimSpace(part) == "" { // Avoid sending empty messages
 			continue
 		}
-		_, err := s.Client.SendMessageComplex(channelID, api.SendMessageData{Content: part})
+		_, err := s.SendMessageComplex(channelID, api.SendMessageData{Content: part})
 		if err != nil {
 			return fmt.Errorf("failed to send message part %d/%d: %w", i+1, len(parts), err)
 		}
 	}
+
 	return nil
 }

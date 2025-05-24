@@ -45,5 +45,6 @@ func (c *PingCommand) Execute(ctx context.Context, s *session.Session, e *gatewa
 	if err != nil {
 		return err
 	}
+
 	return nil
 }

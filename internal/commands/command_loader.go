@@ -43,16 +43,19 @@ func NewCommandManager(params CommandManagerParams) *CommandManager {
 	for _, cmd := range params.Commands {
 		if cmd == nil {
 			params.Logger.Warn("Received a nil command from Fx group")
+
 			continue
 		}
 		if _, exists := cm.commandMap[cmd.Name()]; exists {
 			params.Logger.Warn("Duplicate command name provided by Fx", zap.String("commandName", cmd.Name()))
+
 			continue
 		}
 		cm.commandMap[cmd.Name()] = cmd
 		params.Logger.Debug("Loaded command via Fx", zap.String("commandName", cmd.Name()))
 	}
 	params.Logger.Info("CommandManager created", zap.Int("numberOfCommandsLoaded", len(cm.commandMap)))
+
 	return cm
 }
 
@@ -62,6 +65,7 @@ func (cm *CommandManager) GetCommand(name string) (Command, bool) {
 	if !ok {
 		cm.logger.Warn("Attempted to get unknown command", zap.String("commandName", name))
 	}
+
 	return cmd, ok
 }
 
@@ -80,6 +84,7 @@ func (cm *CommandManager) RegisterCommands(guildIDs []discord.GuildID) {
 
 	if len(cmdsToRegister) == 0 {
 		cm.logger.Info("No commands to register.")
+
 		return
 	}
 
@@ -98,6 +103,7 @@ func (cm *CommandManager) RegisterCommands(guildIDs []discord.GuildID) {
 				zap.Stringer("applicationID", cm.applicationID),
 			)
 		}
+
 		return // Exit after attempting global registration
 	}
 
@@ -110,6 +116,7 @@ func (cm *CommandManager) RegisterCommands(guildIDs []discord.GuildID) {
 				zap.Stringer("applicationID", cm.applicationID),
 				zap.Stringer("guildID", guildID),
 			)
+
 			continue
 		}
 		cm.logger.Info("Successfully registered slash commands for guild",
@@ -137,6 +144,7 @@ func (cm *CommandManager) UnregisterAllCommands(guildIDs []discord.GuildID) {
 		} else {
 			cm.logger.Info("Successfully requested to unregister all global slash commands.")
 		}
+
 		return // Exit after attempting global unregistration
 	}
 
@@ -149,6 +157,7 @@ func (cm *CommandManager) UnregisterAllCommands(guildIDs []discord.GuildID) {
 				zap.Stringer("applicationID", cm.applicationID),
 				zap.Stringer("guildID", guildID),
 			)
+
 			continue
 		}
 		cm.logger.Info("Successfully requested to unregister all slash commands for guild",

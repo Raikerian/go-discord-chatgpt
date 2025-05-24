@@ -63,7 +63,7 @@ go test -v ./...
 
 Run linting:
 ```bash
-golangci-lint run
+go tool -modfile=golangci-lint.mod golangci-lint run
 ```
 
 ### Building

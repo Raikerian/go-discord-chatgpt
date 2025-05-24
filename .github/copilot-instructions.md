@@ -143,6 +143,28 @@ This document provides instructions and context for GitHub Copilot to effectivel
     *   **Automated Deployment**: Production deployment to DigitalOcean via [`.github/scripts/deploy.sh`](.github/scripts/deploy.sh) with health checks and rollback capabilities.
     *   **Pipeline Validation**: Local testing via [`test-pipeline.sh`](test-pipeline.sh) script for validating complete CI/CD setup.
 
+## Local Development
+
+### Running Tests
+```bash
+go test -v ./...
+```
+
+### Running Linting
+```bash
+go tool -modfile=golangci-lint.mod golangci-lint run
+```
+
+### Building the Application
+```bash
+go build -o go-discord-chatgpt ./cmd/main.go
+```
+
+### Running the Bot Locally
+```bash
+go run cmd/main.go
+```
+
 ## Development Guidelines & Preferences
 
 *   **Modularity**: Keep components decoupled and use Fx for wiring them together.

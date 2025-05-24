@@ -22,6 +22,7 @@ type ConversationStore interface {
 	GetConversation(threadID string) (data *gpt.MessagesCacheData, found bool)
 	StoreInitialConversation(threadID string, userPrompt, aiResponse, model, userName, botName string, nameSanitizer func(string) string)
 	UpdateConversationWithNewMessages(threadID string, existingMessages []openai.ChatCompletionMessage, newUserMessage, newAssistantMessage openai.ChatCompletionMessage, modelName string)
+	UpdateConversationMessages(threadID string, messages []openai.ChatCompletionMessage, model string)
 	ReconstructAndCache(
 		ctx context.Context,
 		ses *session.Session,
@@ -101,6 +102,16 @@ func (cs *cacheBasedConversationStore) UpdateConversationWithNewMessages(threadI
 	}
 	cs.messagesCache.Add(threadID, cacheData)
 	cs.logger.Debug("Updated conversation in cache", zap.String("threadID", threadID), zap.Int("messageCount", len(updatedMessages)))
+}
+
+// UpdateConversationMessages updates conversation with new messages (for immediate user message caching and AI response updates).
+func (cs *cacheBasedConversationStore) UpdateConversationMessages(threadID string, messages []openai.ChatCompletionMessage, model string) {
+	cacheData := &gpt.MessagesCacheData{
+		Messages: messages,
+		Model:    model,
+	}
+	cs.messagesCache.Add(threadID, cacheData)
+	cs.logger.Debug("Updated conversation messages in cache", zap.String("threadID", threadID), zap.Int("messageCount", len(messages)))
 }
 
 // ReconstructAndCache reconstructs conversation history from Discord messages and caches it.

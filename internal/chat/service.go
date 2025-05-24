@@ -30,6 +30,10 @@ type Service struct {
 	// ongoingRequests stores cancel functions for ongoing OpenAI requests per thread.
 	// key: discord.ChannelID, value: context.CancelFunc
 	ongoingRequests sync.Map
+
+	// threadMutexes ensures sequential processing per thread for cache consistency.
+	// key: discord.ChannelID, value: *sync.Mutex
+	threadMutexes sync.Map
 }
 
 // NewService creates a new refactored chat Service.
@@ -51,6 +55,12 @@ func NewService(
 		conversationStore:  conversationStore,
 		modelSelector:      modelSelector,
 	}
+}
+
+// getOrCreateThreadMutex returns a mutex for the given thread to ensure sequential processing.
+func (s *Service) getOrCreateThreadMutex(channelID discord.ChannelID) *sync.Mutex {
+	mutex, _ := s.threadMutexes.LoadOrStore(channelID, &sync.Mutex{})
+	return mutex.(*sync.Mutex)
 }
 
 // HandleChatInteraction processes a new chat command.
@@ -150,6 +160,30 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 	)
 	threadIDStr := evt.ChannelID.String()
 
+	threadMutex := s.getOrCreateThreadMutex(evt.ChannelID)
+
+	// 1. IMMEDIATE CANCELLATION (no lock needed for sync.Map)
+	if existingCancel, loaded := s.ongoingRequests.LoadAndDelete(evt.ChannelID); loaded {
+		if cancelFunc, ok := existingCancel.(context.CancelFunc); ok {
+			s.logger.Info("Cancelling previous OpenAI request for thread",
+				zap.String("threadID", evt.ChannelID.String()))
+			cancelFunc() // Previous request should return quickly
+		}
+	}
+
+	// 2. ACQUIRE PROCESSING LOCK for cache consistency
+	threadMutex.Lock()
+	defer threadMutex.Unlock()
+
+	// 3. SET UP NEW REQUEST CONTEXT
+	requestCtx, cancel := context.WithCancel(ctx)
+	s.ongoingRequests.Store(evt.ChannelID, cancel)
+
+	defer func() {
+		s.ongoingRequests.Delete(evt.ChannelID)
+		cancel()
+	}()
+
 	// Negative Cache Check
 	if s.conversationStore.IsInNegativeCache(threadIDStr) {
 		s.logger.Debug("Thread is in negative cache, ignoring message", zap.String("threadID", threadIDStr))
@@ -177,7 +211,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		}
 
 		reconstructedData, reconstructedModelName, err := s.conversationStore.ReconstructAndCache(
-			ctx, s.ses, evt.ChannelID, evt.ID, selfUser, botDisplayName, SanitizeOpenAIName, GetUserDisplayName,
+			requestCtx, s.ses, evt.ChannelID, evt.ID, selfUser, botDisplayName, SanitizeOpenAIName, GetUserDisplayName,
 		)
 		if err != nil {
 			s.logger.Error("Failed to reconstruct conversation", zap.Error(err), zap.String("threadID", threadIDStr))
@@ -193,7 +227,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		modelToUse = reconstructedModelName
 	}
 
-	// Append the new user message
+	// 4. IMMEDIATELY add user message to cache (after reconstruction if needed)
 	authorDisplayName := GetUserDisplayName(evt.Author)
 	newUserMessage := openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
@@ -204,19 +238,14 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 	// Copy existing messages and add the new user message
 	messages := append(cachedData.Messages, newUserMessage)
 
-	// Manage Ongoing OpenAI Requests (Cancellation)
-	requestCtx, cancelCurrentRequest := context.WithCancel(ctx)
-	if existingCancel, loaded := s.ongoingRequests.LoadAndDelete(evt.ChannelID); loaded {
-		if cancelFunc, ok := existingCancel.(context.CancelFunc); ok {
-			s.logger.Info("Cancelling previous OpenAI request for thread", zap.String("threadID", threadIDStr))
-			cancelFunc()
-		}
-	}
-	s.ongoingRequests.Store(evt.ChannelID, cancelCurrentRequest)
-	defer s.ongoingRequests.Delete(evt.ChannelID)
-	defer cancelCurrentRequest()
+	// Update cache with user message immediately
+	s.conversationStore.UpdateConversationMessages(threadIDStr, messages, modelToUse)
+	s.logger.Debug("User message added to cache immediately",
+		zap.String("threadID", threadIDStr),
+		zap.String("userMessage", evt.Content),
+		zap.Int("totalMessages", len(messages)))
 
-	// Interact with OpenAI
+	// 5. Send to OpenAI (this should return quickly if cancelled)
 	stopTyping := s.interactionManager.StartTypingIndicator(s.ses, evt.ChannelID)
 	defer stopTyping()
 
@@ -228,26 +257,32 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 
 	aiResponse, err := s.aiProvider.GetChatCompletion(requestCtx, modelToUse, messages)
 
+	// Handle cancellation
 	if errors.Is(requestCtx.Err(), context.Canceled) {
-		s.logger.Info("OpenAI request was cancelled (likely by a newer message)", zap.String("threadID", threadIDStr))
-		return nil
-	}
-	if err != nil {
-		s.logger.Error("OpenAI completion failed for thread message", zap.Error(err), zap.String("threadID", threadIDStr))
-		errMsgToThread := "Sorry, I encountered an error trying to process your message. Please try again."
-		if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, errMsgToThread); sendErr != nil {
-			s.logger.Error("Failed to send error message to thread after OpenAI failure", zap.Error(sendErr), zap.String("threadID", threadIDStr))
-		}
-		return fmt.Errorf("OpenAI completion failed: %w", err)
+		s.logger.Info("OpenAI request was cancelled, user message preserved in cache",
+			zap.String("threadID", threadIDStr))
+		return nil // User message already cached, lock will be released by defer
 	}
 
+	// Handle OpenAI errors (user message already cached)
+	if err != nil {
+		s.logger.Error("OpenAI completion failed for thread message", zap.Error(err))
+		// Send error to Discord but preserve user message in cache
+		errMsg := "Sorry, I encountered an error. Please try again."
+		if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, errMsg); sendErr != nil {
+			s.logger.Error("Failed to send error message", zap.Error(sendErr))
+		}
+		return fmt.Errorf("OpenAI completion failed: %w", err) // User message preserved
+	}
+
+	// 6. Process successful response
 	if len(aiResponse.Choices) == 0 || aiResponse.Choices[0].Message.Content == "" {
 		s.logger.Error("OpenAI returned no choices or empty message content", zap.String("threadID", threadIDStr))
 		errMsgToThread := "Sorry, I received an empty response from the AI. Please try again."
 		if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, errMsgToThread); sendErr != nil {
 			s.logger.Error("Failed to send error message to thread for empty AI response", zap.Error(sendErr), zap.String("threadID", threadIDStr))
 		}
-		return errors.New("OpenAI returned no choices")
+		return errors.New("OpenAI returned no choices") // User message preserved
 	}
 
 	aiMessageContent := aiResponse.Choices[0].Message.Content
@@ -257,16 +292,23 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		zap.Int("completionTokens", aiResponse.Usage.CompletionTokens),
 	)
 
-	// Send Response to Discord
+	// Send response to Discord
 	if err := s.interactionManager.SendMessage(s.ses, evt.ChannelID, aiMessageContent); err != nil {
 		s.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", threadIDStr))
 	}
 
-	// Update Cache
+	// 7. Add AI response to cache (with validation)
+	currentCachedData, found := s.conversationStore.GetConversation(threadIDStr)
+	if !found {
+		s.logger.Warn("Conversation cache was evicted during OpenAI request, AI response not cached",
+			zap.String("threadID", threadIDStr))
+		return nil // User message already cached, graceful degradation
+	}
+
 	botDisplayName, err := s.getBotDisplayName()
 	if err != nil {
-		s.logger.Error("Failed to get bot display name in HandleThreadMessage", zap.Error(err))
-		botDisplayName = defaultBotName
+		s.logger.Error("Failed to get bot display name", zap.Error(err))
+		botDisplayName = "Assistant"
 	}
 
 	aiMessage := openai.ChatCompletionMessage{
@@ -275,9 +317,12 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		Name:    SanitizeOpenAIName(botDisplayName),
 	}
 
-	s.conversationStore.UpdateConversationWithNewMessages(threadIDStr, cachedData.Messages, newUserMessage, aiMessage, modelToUse)
+	finalMessages := append(currentCachedData.Messages, aiMessage)
+	s.conversationStore.UpdateConversationMessages(threadIDStr, finalMessages, modelToUse)
+	s.logger.Info("AI response added to cache",
+		zap.String("threadID", threadIDStr),
+		zap.Int("finalMessageCount", len(finalMessages)))
 
-	s.logger.Info("Successfully processed thread message and updated cache", zap.String("threadID", threadIDStr))
 	return nil
 }
 

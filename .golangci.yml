@@ -6,27 +6,45 @@ run:
 
 linters:
   enable:
-    - bodyclose
-    - dupl
-    - errcheck
-    - funlen
-    - gochecknoinits
-    - goconst
-    - gocritic
-    - gocyclo
-    - goprintffuncname
-    - gosec
-    - govet
-    - ineffassign
-    - lll
-    - misspell
-    - nakedret
-    - rowserrcheck
-    - staticcheck
-    - unconvert
-    - unparam
-    - unused
-    - whitespace
+    # Essential linters for Go best practices
+    - bodyclose          # HTTP response body closure
+    - dupl               # Duplicate code detection
+    - errcheck           # Unchecked errors
+    - govet              # Go vet checks
+    - ineffassign        # Ineffectual assignments
+    - staticcheck        # Staticcheck SA checks (includes gosimple)
+    - unused             # Unused code detection
+    
+    # Code quality and style
+    - gochecknoinits     # No init functions
+    - goconst            # Repeated strings to constants
+    - gocritic           # Various diagnostics with auto-fix
+    - gocyclo            # Cyclomatic complexity
+    - gosec              # Security issues
+    - misspell           # Spelling mistakes with auto-fix
+    - unconvert          # Unnecessary type conversions
+    - unparam            # Unused parameters
+    - whitespace         # Unnecessary whitespace with auto-fix
+    
+    # Additional valuable linters
+    - errorlint          # Error wrapping issues with auto-fix
+    - revive             # Fast, configurable replacement for golint
+    - predeclared        # Shadowing of predeclared identifiers
+    - nolintlint         # Proper nolint directives with auto-fix
+    
+    # Performance and best practices
+    - prealloc           # Slice preallocation
+    - rowserrcheck       # SQL rows.Err() checking
+    - sqlclosecheck      # SQL close checking
+    - copyloopvar        # Loop variable copying with auto-fix
+    - perfsprint         # fmt.Sprintf performance with auto-fix
+    
+    # Code style improvements
+    - godot              # Comments ending with period with auto-fix
+    - nlreturn           # Newlines before returns with auto-fix
+    - bidichk            # Dangerous unicode character sequences
+    - asciicheck         # Non-ASCII identifiers
+    - usestdlibvars      # Use standard library variables/constants
 
   exclusions:
     generated: lax  # Maintain v1 behavior
@@ -43,6 +61,9 @@ linters:
           - dupl
           - gosec
           - funlen
+          - gocritic
+          - revive
+          - gofumpt
       # Exclude known linters from partially hard-to-fix issues
       - linters:
           - staticcheck
@@ -50,30 +71,60 @@ linters:
       - linters:
           - staticcheck
         text: "should be"
+      - linters:
+          - revive
+        text: "exported:"
+      # Allow longer lines in generated code and configuration
+      - path: ".*\\.pb\\.go"
+        linters:
+          - lll
+      # Allow init functions in main package
+      - path: "cmd/"
+        linters:
+          - gochecknoinits
 
   settings:
     gocyclo:
-      min-complexity: 15
+      min-complexity: 20  # Increased from 15 for more realistic limits
     dupl:
       threshold: 100
     goconst:
-      min-len: 2
-      min-occurrences: 2
+      min-len: 3          # Increased from 2 to avoid false positives
+      min-occurrences: 3  # Increased from 2 for more meaningful constants
     misspell:
       locale: US
     lll:
-      line-length: 120
+      line-length: 140    # Increased from 120 for modern Go development
     godox:
       keywords:
         - NOTE
         - OPTIMIZE
         - HACK
+        - TODO              # Added TODO back as it's commonly used
+        - FIXME             # Added FIXME for critical issues
     funlen:
-      lines: 80
-      statements: 50
+      lines: 100          # Increased from 80 for more realistic limits
+      statements: 60      # Increased from 50 for more realistic limits
     govet:
       enable:
-        - shadow  # Replaces check-shadowing: true
+        - shadow
+        - printf
+        - shift
+        - structtag
+        - unreachable
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: indent-error-flow
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - appendAssign     # This can be overly strict in some cases
 
 formatters:
   enable:

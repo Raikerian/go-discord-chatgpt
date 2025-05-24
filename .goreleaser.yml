@@ -1,0 +1,126 @@
+version: 2
+
+project_name: go-discord-chatgpt
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: go-discord-chatgpt
+    main: ./cmd/main.go
+    binary: go-discord-chatgpt
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/Raikerian/go-discord-chatgpt/internal/commands.AppVersion={{ if .IsSnapshot }}{{.ShortCommit}}{{ else }}{{.Version}}{{ end }}
+      - -X main.version={{ if .IsSnapshot }}{{.ShortCommit}}{{ else }}{{.Version}}{{ end }}
+      - -X main.commit={{.FullCommit}}
+      - -X main.date={{.Date}}
+      - -X main.builtBy=goreleaser
+
+dockers:
+  - image_templates:
+      # Use commit SHA for snapshots, semantic version for releases
+      - "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .ShortCommit }}-amd64{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-amd64{{ end }}"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-amd64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{ if .IsSnapshot }}{{.ShortCommit}}{{ else }}{{.Version}}{{ end }}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+    extra_files:
+      - go.mod
+      - go.sum
+    goarch: amd64
+
+  - image_templates:
+      # Use commit SHA for snapshots, semantic version for releases
+      - "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .ShortCommit }}-arm64{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-arm64{{ end }}"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-arm64"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{ if .IsSnapshot }}{{.ShortCommit}}{{ else }}{{.Version}}{{ end }}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+    extra_files:
+      - go.mod
+      - go.sum
+    goarch: arm64
+
+docker_manifests:
+  - name_template: "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .ShortCommit }}{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}{{ end }}"
+    image_templates:
+      - "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .ShortCommit }}-amd64{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-amd64{{ end }}"
+      - "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .ShortCommit }}-arm64{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-arm64{{ end }}"
+
+  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest"
+    image_templates:
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-amd64"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-arm64"
+
+archives:
+  - id: go-discord-chatgpt
+    files:
+      - LICENSE
+      - README.md
+      - config.example.yaml
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "^style:"
+  groups:
+    - title: Features
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: Bug fixes
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: Others
+      order: 999
+
+release:
+  github:
+    owner: Raikerian
+    name: go-discord-chatgpt
+  draft: false
+  prerelease: auto
+  name_template: "Release {{.Version}}"
+  header: |
+    ## Discord ChatGPT Bot {{.Version}}
+    
+    Welcome to this new release!

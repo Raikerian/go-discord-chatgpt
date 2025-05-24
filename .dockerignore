@@ -1,0 +1,17 @@
+.git
+.github
+.gitignore
+README.md
+Dockerfile
+Dockerfile.goreleaser
+.dockerignore
+.goreleaser.yml
+config.yaml
+*.log
+.env
+.vscode
+.idea
+**/*_test.go
+**/*.md
+LICENSE
+dist/

@@ -34,10 +34,15 @@ This document provides instructions and context for GitHub Copilot to effectivel
 ├── internal/
 │   ├── bot/
 │   │   ├── bot.go          # Core bot service, handles startup/shutdown logic, interaction event routing.
-│   │   └── handlers.go     # Interaction event handlers (e.g., for slash commands).
-│   ├── chat/               # Service for handling chat logic
-│   │   ├── service.go      # Core chat service implementation.
-│   │   └── util.go         # Utility functions for the chat service: MakeThreadName (generates truncated thread titles from usernames/prompts) and SendLongMessage (splits long messages for Discord).
+│   │   └── handlers.go     # Interaction event handlers (e.g., for slash commands and thread messages).
+│   ├── chat/               # Modular chat service architecture with specialized components
+│   │   ├── service.go      # Main chat service orchestrator that coordinates all chat components.
+│   │   ├── ai_provider.go  # AIProvider interface and OpenAI implementation for chat completions.
+│   │   ├── conversation_store.go # ConversationStore interface for managing conversation history and caching.
+│   │   ├── interaction_manager.go # DiscordInteractionManager for Discord API interactions (responses, threads, typing).
+│   │   ├── model_selector.go # ModelSelector interface for choosing AI models based on user preferences.
+│   │   ├── summary_parser.go # SummaryParser interface for parsing thread summary messages to extract metadata.
+│   │   └── util.go         # Utility functions: GetUserDisplayName, SanitizeOpenAIName, MakeThreadName, SendLongMessage.
 │   ├── commands/
 │   │   ├── chat.go         # Implementation of the `/chat` command, which delegates to the `chat.Service`.
 │   │   ├── command_loader.go # CommandManager: loads commands from Fx, registers/unregisters with Discord.
@@ -49,23 +54,30 @@ This document provides instructions and context for GitHub Copilot to effectivel
 │   ├── config/
 │   │   └── config.go       # Configuration struct and loading logic.
 │   └── gpt/
-│       ├── cache.go        # LRU Cache implementation for OpenAI messages.
-│       └── negative_cache.go # Implements a negative cache, likely for GPT query results or error states.
-└── pkg/                    # (Currently empty) Intended for reusable library code.
+│       ├── cache.go        # LRU Cache implementation for OpenAI messages (MessagesCache).
+│       └── negative_cache.go # LRU cache for threads that should be ignored (NegativeThreadCache).
+
 ```
 
 ## Core Architectural Decisions & Patterns
 
 1.  **Dependency Injection with Uber Fx**:
-    *   The application's components (config, logger, Discord session, OpenAI client, message cache, **chat service ([`internal/chat/service.go`](internal/chat/service.go))**, command manager, bot service, commands like [`ChatCommand`](internal/commands/chat.go)) are managed by Fx.
-    *   Providers for these components are defined in `cmd/main.go`.
+    *   The application's components (config, logger, Discord session, OpenAI client, message cache, negative thread cache, **chat service components**, command manager, bot service, commands like [`ChatCommand`](internal/commands/chat.go)) are managed by Fx.
+    *   **Chat Service Components**: The chat system is now modular with several specialized services:
+        *   [`chat.Service`](internal/chat/service.go) - Main orchestrator that coordinates all chat interactions
+        *   [`chat.AIProvider`](internal/chat/ai_provider.go) - Interface for AI completions (OpenAI implementation)
+        *   [`chat.ConversationStore`](internal/chat/conversation_store.go) - Manages conversation history and caching
+        *   [`chat.DiscordInteractionManager`](internal/chat/interaction_manager.go) - Handles Discord API interactions
+        *   [`chat.ModelSelector`](internal/chat/model_selector.go) - Selects appropriate AI models
+        *   [`chat.SummaryParser`](internal/chat/summary_parser.go) - Parses thread summary messages
+    *   Providers for these components are defined in `cmd/main.go` using a modular approach where the [`chat.ConversationStore`](internal/chat/conversation_store.go) is created via a custom provider function (`newConversationStoreProvider`) that combines multiple dependencies.
     *   Fx handles the lifecycle (start/stop) of these components. For example, the Discord session is opened on start and closed on stop, and commands are registered/unregistered accordingly.
 
 2.  **Configuration Management**:
     *   Configuration is loaded from `config.yaml` into the `config.Config` struct ([`internal/config/config.go`](internal/config/config.go)).
     *   This includes Discord settings (bot token, app ID, guild IDs, interaction timeout) and OpenAI settings (API key, preferred models, message cache size, negative thread cache size, max concurrent requests).
     *   The path to `config.yaml` is supplied to Fx in [`cmd/main.go`](cmd/main.go).
-    *   The `*config.Config` object is then available for injection into other components. For example, `discord.interaction_timeout_seconds` is used by the [`Bot`](internal/bot/bot.go) service, `openai.message_cache_size` configures the [`gpt.MessagesCache`](internal/gpt/cache.go), and `openai.negative_thread_cache_size` configures the `gpt.NegativeThreadCache`.
+    *   The `*config.Config` object is then available for injection into other components. For example, `discord.interaction_timeout_seconds` is used by the [`Bot`](internal/bot/bot.go) service, `openai.message_cache_size` configures the conversation store cache, and `openai.negative_thread_cache_size` configures the negative thread cache.
 
 3.  **Logging**:
     *   Zap is used for structured logging.
@@ -78,7 +90,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
     *   **Fx Provisioning**: These constructors are provided to Fx in `cmd/main.go` and tagged with `fx.ResultTags(\`group:"commands"\`)`.
     *   **CommandManager**: The [`commands.CommandManager`](internal/commands/command_loader.go) ([`internal/commands/command_loader.go`](internal/commands/command_loader.go)) receives all [`commands.Command`](internal/commands/command.go) implementations from the "commands" Fx group.
     *   **Registration**: On startup, [`CommandManager.RegisterCommands()`](internal/commands/command_loader.go) iterates through the loaded commands and registers them with Discord (globally or for specific guilds listed in `config.yaml`). It unregisters them on shutdown.
-    *   **Dispatch**: The [`Bot`](internal/bot/bot.go) service ([`internal/bot/bot.go`](internal/bot/bot.go)) receives interaction create events from Arikawa. The [`handleInteraction`](internal/bot/handlers.go) function ([`internal/bot/handlers.go`](internal/bot/handlers.go)) uses the [`CommandManager`](internal/commands/command_loader.go) to find the appropriate command handler based on the interaction data and then executes it. The [`ChatCommand`](internal/commands/chat.go) delegates its core execution logic to the [`chat.Service`](internal/chat/service.go).
+    *   **Dispatch**: The [`Bot`](internal/bot/bot.go) service ([`internal/bot/bot.go`](internal/bot/bot.go)) receives interaction create events from Arikawa. The [`handleInteraction`](internal/bot/handlers.go) function ([`internal/bot/handlers.go`](internal/bot/handlers.go)) uses the [`CommandManager`](internal/commands/command_loader.go) to find the appropriate command handler based on the interaction data and then executes it. The [`ChatCommand`](internal/commands/chat.go) delegates its core execution logic to the [`chat.Service`](internal/chat/service.go). Additionally, the bot handles thread message events via the [`handleMessageCreate`](internal/bot/handlers.go) function, which also delegates to the [`chat.Service`](internal/chat/service.go) for thread message processing.
 
 5.  **Discord Session**:
     *   The Arikawa `*session.Session` is created and managed by Fx ([`NewSession`](cmd/main.go) in [`cmd/main.go`](cmd/main.go)).
@@ -94,7 +106,10 @@ This document provides instructions and context for GitHub Copilot to effectivel
 
 7.  **OpenAI Integration & Caching**:
     *   **OpenAI Client**: An `*openai.Client` is created and managed by Fx ([`NewOpenAIClient`](cmd/main.go) in [`cmd/main.go`](cmd/main.go)), configured with the API key from `config.yaml`.
-    *   **Message Cache**: A [`gpt.MessagesCache`](internal/gpt/cache.go) ([`internal/gpt/cache.go`](internal/gpt/cache.go)) using `hashicorp/golang-lru/v2` is provided by Fx. Its size is configurable via `config.yaml` (`openai.message_cache_size`).
+    *   **Specialized Components**: Various specialized components for the chat system are now provided individually:
+        *   [`gpt.MessagesCache`](internal/gpt/cache.go) - LRU cache for OpenAI message history, configured by `openai.message_cache_size`
+        *   [`gpt.NegativeThreadCache`](internal/gpt/negative_cache.go) - LRU cache for threads to ignore, configured by `openai.negative_thread_cache_size`
+        *   [`chat.ConversationStore`](internal/chat/conversation_store.go) - Created via a custom provider that creates internal caches based on configuration settings
     *   These components are available for injection into services that require interaction with the OpenAI API or its message history, primarily the **[`chat.Service`](internal/chat/service.go)** (which is then used by commands like [`ChatCommand`](internal/commands/chat.go)).
 
 ## Development Guidelines & Preferences

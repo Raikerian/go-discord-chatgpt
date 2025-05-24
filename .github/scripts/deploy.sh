@@ -2,7 +2,7 @@
 set -euo pipefail
 
 VERSION="${1:-latest}"
-IMAGE_NAME="ghcr.io/$GITHUB_REPOSITORY:$VERSION"
+IMAGE_NAME="ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]'):$VERSION"
 CONTAINER_NAME="go-discord-chatgpt"
 CONFIG_DIR="/opt/go-discord-chatgpt"
 
@@ -72,7 +72,7 @@ docker inspect --format='Version: {{.Config.Labels.version}}, Deployed: {{.Confi
 
 # Clean up old images (keep last 3)
 log "Cleaning up old images..."
-docker images "ghcr.io/$GITHUB_REPOSITORY" --format "table {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}" | \
+docker images "ghcr.io/$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')" --format "table {{.Repository}}:{{.Tag}}\t{{.CreatedAt}}" | \
     tail -n +4 | awk '{print $1}' | head -n -3 | xargs -r docker rmi || true
 
 log "Deployment complete!"

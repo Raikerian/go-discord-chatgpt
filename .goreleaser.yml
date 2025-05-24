@@ -15,7 +15,6 @@ builds:
       - linux
     goarch:
       - amd64
-      - arm64
     env:
       - CGO_ENABLED=0
     flags:
@@ -31,8 +30,8 @@ builds:
 dockers:
   - image_templates:
       # Use commit SHA for snapshots, semantic version for releases
-      - "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .ShortCommit }}-amd64{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-amd64{{ end }}"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-amd64"
+      - "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY | lower }}:{{ .ShortCommit }}{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY | lower }}:{{ .Version }}{{ end }}"
+      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY | lower }}:latest"
     dockerfile: Dockerfile.goreleaser
     use: buildx
     build_flag_templates:
@@ -47,36 +46,6 @@ dockers:
       - go.mod
       - go.sum
     goarch: amd64
-
-  - image_templates:
-      # Use commit SHA for snapshots, semantic version for releases
-      - "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .ShortCommit }}-arm64{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-arm64{{ end }}"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-arm64"
-    dockerfile: Dockerfile.goreleaser
-    use: buildx
-    build_flag_templates:
-      - "--pull"
-      - "--platform=linux/arm64"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{ if .IsSnapshot }}{{.ShortCommit}}{{ else }}{{.Version}}{{ end }}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-    extra_files:
-      - go.mod
-      - go.sum
-    goarch: arm64
-
-docker_manifests:
-  - name_template: "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .ShortCommit }}{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}{{ end }}"
-    image_templates:
-      - "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .ShortCommit }}-amd64{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-amd64{{ end }}"
-      - "{{ if .IsSnapshot }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .ShortCommit }}-arm64{{ else }}ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:{{ .Version }}-arm64{{ end }}"
-
-  - name_template: "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest"
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPOSITORY }}:latest-arm64"
 
 archives:
   - id: go-discord-chatgpt

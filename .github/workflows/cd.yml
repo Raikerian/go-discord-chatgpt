@@ -33,9 +33,9 @@ jobs:
       run: go test -v ./...
     
     - name: Run linting
-      uses: golangci/golangci-lint-action@v4
+      uses: golangci/golangci-lint-action@v6
       with:
-        version: latest
+        version: v2.1.6
 
   release:
     runs-on: ubuntu-latest

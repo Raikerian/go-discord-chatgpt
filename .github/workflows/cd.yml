@@ -92,7 +92,7 @@ jobs:
           docker rm go-discord-chatgpt || true
           
           # Pull specific version image built by GoReleaser
-          docker pull ghcr.io/raikerian/go-discord-chatgpt:$VERSION
+          docker pull -q ghcr.io/raikerian/go-discord-chatgpt:$VERSION
           
           # Create config directory if it doesn't exist
           mkdir -p /opt/go-discord-chatgpt
@@ -106,11 +106,8 @@ jobs:
             --restart unless-stopped \
             --label "version=$VERSION" \
             --label "deployed=$(date -Iseconds)" \
-            -v /opt/go-discord-chatgpt/config.yaml:/app/config.yaml:ro \
+            -v /opt/go-discord-chatgpt/config.yaml:/config.yaml:ro \
             ghcr.io/raikerian/go-discord-chatgpt:$VERSION
-          
-          # Clean up old images
-          docker image prune -f
 
   snapshot-build:
     runs-on: ubuntu-latest

@@ -16,6 +16,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 *   **Testify (mock, require, assert)**: For writing unit tests and making assertions.
 *   **Mockery (vektra/mockery)**: For generating mock implementations of interfaces, configured via `.mockery.yml`.
 *   **go-openai (sashabaranov/go-openai)**: Go client library for the OpenAI API.
+*   **go-openai-realtime (WqyJh/go-openai-realtime)**: Go SDK for OpenAI Realtime API enabling real-time voice and text conversations. (See also: [`go-openai-realtime.instructions.md`](.github/instructions/go-openai-realtime.instructions.md) for detailed guidance on using the OpenAI Realtime API for voice features).
 *   **golang-lru (hashicorp/golang-lru/v2)**: LRU cache implementation, used for caching OpenAI message history.
 *   **GoReleaser v2**: Professional release management tool for building, packaging, and releasing Go applications with multi-architecture support.
 *   **GitHub Actions**: CI/CD automation platform for testing, building, and deploying the application.
@@ -190,6 +191,7 @@ go run cmd/main.go
 ## Current Focus & Future Considerations
 
 *   **Enhancing ChatGPT Commands**: Building upon the existing [`/chat`](internal/commands/chat.go) command and its underlying **[`chat.Service`](internal/chat/service.go)**, further refining context management (e.g., using the [`MessagesCache`](internal/gpt/cache.go) within the **[`chat.Service`](internal/chat/service.go)** more extensively for follow-up messages), prompt engineering capabilities, and exploring new GPT-powered features.
+*   **Voice and Realtime Features**: Exploring integration with OpenAI's Realtime API for voice conversations and real-time interactions using the `go-openai-realtime` library. This could enable voice commands, voice responses, and real-time conversational experiences in Discord voice channels.
 *   **Improving User Experience**: Continuously expanding error handling, providing clearer user feedback in Discord, especially for API interactions (like OpenAI calls managed by the **[`chat.Service`](internal/chat/service.go)** for the [`ChatCommand`](internal/commands/chat.go)) and longer operations.
 *   **Comprehensive Testing**: Increasing test coverage, particularly with integration tests for command flows involving OpenAI and other external services. The [`ChatCommand`](internal/commands/chat.go) and particularly the **[`chat.Service`](internal/chat/service.go)** are key candidates for such tests.
 *   **Configuration Flexibility**: Exploring more dynamic configuration options or in-Discord configuration commands.

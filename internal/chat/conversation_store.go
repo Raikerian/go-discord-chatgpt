@@ -22,7 +22,7 @@ const (
 type ConversationStore interface {
 	GetConversation(threadID string) (data *gpt.MessagesCacheData, found bool)
 	StoreInitialConversation(threadID string, userPrompt, aiResponse, model, userName, botName string, nameSanitizer func(string) string)
-	UpdateConversationWithNewMessages(threadID string, existingMessages []openai.ChatCompletionMessage, newUserMessage, newAssistantMessage openai.ChatCompletionMessage, modelName string)
+	UpdateConversationWithNewMessages(threadID string, existingMessages []openai.ChatCompletionMessage, newUserMessage, newAssistantMessage *openai.ChatCompletionMessage, modelName string)
 	UpdateConversationMessages(threadID string, messages []openai.ChatCompletionMessage, model string)
 	ReconstructAndCache(
 		ctx context.Context,
@@ -32,7 +32,7 @@ type ConversationStore interface {
 		selfUser *discord.User,
 		botDisplayName string,
 		nameSanitizer func(string) string,
-		userDisplayNameResolver func(user discord.User) string,
+		userDisplayNameResolver func(user *discord.User) string,
 	) (cacheData *gpt.MessagesCacheData, modelName string, err error)
 	AddToNegativeCache(threadID string)
 	IsInNegativeCache(threadID string) bool
@@ -79,7 +79,7 @@ func (cs *cacheBasedConversationStore) GetConversation(threadID string) (*gpt.Me
 }
 
 // StoreInitialConversation stores the initial user prompt and AI response in the message cache.
-func (cs *cacheBasedConversationStore) StoreInitialConversation(threadID string, userPrompt, aiResponse, model, userName, botName string, nameSanitizer func(string) string) {
+func (cs *cacheBasedConversationStore) StoreInitialConversation(threadID, userPrompt, aiResponse, model, userName, botName string, nameSanitizer func(string) string) {
 	if cs.messagesCache != nil {
 		history := []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleUser, Content: userPrompt, Name: nameSanitizer(userName)},
@@ -95,8 +95,8 @@ func (cs *cacheBasedConversationStore) StoreInitialConversation(threadID string,
 }
 
 // UpdateConversationWithNewMessages updates an existing conversation with new messages.
-func (cs *cacheBasedConversationStore) UpdateConversationWithNewMessages(threadID string, existingMessages []openai.ChatCompletionMessage, newUserMessage, newAssistantMessage openai.ChatCompletionMessage, modelName string) {
-	updatedMessages := append(existingMessages, newUserMessage, newAssistantMessage)
+func (cs *cacheBasedConversationStore) UpdateConversationWithNewMessages(threadID string, existingMessages []openai.ChatCompletionMessage, newUserMessage, newAssistantMessage *openai.ChatCompletionMessage, modelName string) {
+	updatedMessages := append(existingMessages, *newUserMessage, *newAssistantMessage)
 	cacheData := &gpt.MessagesCacheData{
 		Messages: updatedMessages,
 		Model:    modelName,
@@ -124,7 +124,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 	selfUser *discord.User,
 	botDisplayName string,
 	nameSanitizer func(string) string,
-	userDisplayNameResolver func(user discord.User) string,
+	userDisplayNameResolver func(user *discord.User) string,
 ) (cacheData *gpt.MessagesCacheData, modelName string, err error) {
 	cs.logger.Info("Attempting to reconstruct conversation history for thread",
 		zap.String("threadID", threadID.String()),
@@ -229,7 +229,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 			name = nameSanitizer(botDisplayName)
 		} else {
 			role = openai.ChatMessageRoleUser
-			messageAuthorDisplayName := userDisplayNameResolver(msg.Author)
+			messageAuthorDisplayName := userDisplayNameResolver(&msg.Author)
 			name = nameSanitizer(messageAuthorDisplayName)
 		}
 		if strings.TrimSpace(msg.Content) == "" {

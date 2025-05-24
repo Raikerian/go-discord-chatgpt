@@ -1,3 +1,4 @@
+// Package bot provides the core Discord bot service and event handlers.
 package bot
 
 import (

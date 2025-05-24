@@ -1,3 +1,4 @@
+// Package gpt provides caching utilities for OpenAI GPT interactions and conversation management.
 package gpt
 
 import (

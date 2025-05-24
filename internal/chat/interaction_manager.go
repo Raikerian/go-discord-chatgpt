@@ -74,7 +74,7 @@ func (dim *discordInteractionManagerImpl) SendInitialResponse(ses *session.Sessi
 }
 
 // CreateThreadForInteraction creates a new thread from the original interaction response.
-func (dim *discordInteractionManagerImpl) CreateThreadForInteraction(ses *session.Session, originalMessage *discord.Message, appID discord.AppID, eventToken string, threadName, originalSummaryMessageForFallback string) (*discord.Channel, error) {
+func (dim *discordInteractionManagerImpl) CreateThreadForInteraction(ses *session.Session, originalMessage *discord.Message, appID discord.AppID, eventToken, threadName, originalSummaryMessageForFallback string) (*discord.Channel, error) {
 	threadCreateAPIData := api.StartThreadData{
 		Name:                threadName,
 		AutoArchiveDuration: discord.ArchiveDuration(60), // TODO: Make configurable?

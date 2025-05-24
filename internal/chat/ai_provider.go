@@ -1,3 +1,4 @@
+// Package chat provides modular chat service components for handling Discord chat interactions with AI.
 package chat
 
 import (

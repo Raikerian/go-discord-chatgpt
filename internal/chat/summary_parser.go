@@ -14,7 +14,7 @@ type SummaryParser interface {
 		content string,
 		referencedMessage *discord.Message,
 		defaultInitialUserName string,
-		userDisplayNameResolver func(user discord.User) string,
+		userDisplayNameResolver func(user *discord.User) string,
 	) (parsedUserPrompt, parsedModelName, initialUserName string, err error)
 }
 
@@ -34,7 +34,7 @@ func (csp *chatSummaryParser) ParseInitialMessage(
 	content string,
 	referencedMessage *discord.Message,
 	defaultInitialUserName string,
-	userDisplayNameResolver func(user discord.User) string,
+	userDisplayNameResolver func(user *discord.User) string,
 ) (parsedUserPrompt, parsedModelName, initialUserName string, err error) {
 	initialUserDisplayName := defaultInitialUserName
 
@@ -44,7 +44,7 @@ func (csp *chatSummaryParser) ParseInitialMessage(
 		content = referencedMessage.Content
 		if referencedMessage.Interaction != nil && referencedMessage.Interaction.User.ID.IsValid() {
 			originalInteractionUser := referencedMessage.Interaction.User
-			initialUserDisplayName = userDisplayNameResolver(originalInteractionUser)
+			initialUserDisplayName = userDisplayNameResolver(&originalInteractionUser)
 		}
 	}
 

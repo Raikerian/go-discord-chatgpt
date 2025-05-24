@@ -1,3 +1,4 @@
+// Package config provides configuration loading and management functionality.
 package config
 
 import (
@@ -29,6 +30,7 @@ type Config struct {
 }
 
 func LoadConfig(filePath string) (*Config, error) {
+	// #nosec G304 - filePath is provided by application during startup, not user input
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err

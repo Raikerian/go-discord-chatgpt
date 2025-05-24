@@ -72,7 +72,7 @@ func (cm *CommandManager) GetCommand(name string) (Command, bool) {
 // RegisterCommands registers all loaded commands with Discord for the specified guilds.
 func (cm *CommandManager) RegisterCommands(guildIDs []discord.GuildID) {
 	cm.logger.Info("Registering slash commands with Discord for specified guilds...", zap.Int("commandCount", len(cm.commandMap)))
-	var cmdsToRegister []api.CreateCommandData
+	cmdsToRegister := make([]api.CreateCommandData, 0, len(cm.commandMap))
 	for _, cmd := range cm.commandMap {
 		cmdsToRegister = append(cmdsToRegister, api.CreateCommandData{
 			Name:        cmd.Name(),

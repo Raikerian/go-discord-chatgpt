@@ -87,7 +87,7 @@ func (s *Service) HandleChatInteraction(ctx context.Context, e *gateway.Interact
 	}
 	s.logger.Info("Determined model for chat", zap.String("modelToUse", modelToUse))
 
-	userDisplayName := GetUserDisplayName(e.Member.User)
+	userDisplayName := GetUserDisplayName(&e.Member.User)
 	botDisplayName, err := s.getBotDisplayName()
 	if err != nil {
 		s.logger.Error("Failed to get bot display name", zap.Error(err))
@@ -237,7 +237,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 	}
 
 	// 4. IMMEDIATELY add user message to cache (after reconstruction if needed)
-	authorDisplayName := GetUserDisplayName(evt.Author)
+	authorDisplayName := GetUserDisplayName(&evt.Author)
 	newUserMessage := openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
 		Content: evt.Content,
@@ -305,8 +305,8 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 	)
 
 	// Send response to Discord
-	if err := s.interactionManager.SendMessage(s.ses, evt.ChannelID, aiMessageContent); err != nil {
-		s.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", threadIDStr))
+	if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, aiMessageContent); sendErr != nil {
+		s.logger.Error("Failed to send AI response to thread", zap.Error(sendErr), zap.String("threadID", threadIDStr))
 	}
 
 	// 7. Add AI response to cache (with validation)
@@ -348,7 +348,7 @@ func (s *Service) getBotDisplayName() (string, error) {
 		return defaultBotName, err
 	}
 
-	return GetUserDisplayName(*botUser), nil
+	return GetUserDisplayName(botUser), nil
 }
 
 func (s *Service) getSelfUser() (*discord.User, error) {

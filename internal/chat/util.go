@@ -18,7 +18,7 @@ const (
 )
 
 // GetUserDisplayName returns the user's display name, or username if display name is empty.
-func GetUserDisplayName(user discord.User) string {
+func GetUserDisplayName(user *discord.User) string {
 	if user.DisplayName != "" {
 		return user.DisplayName
 	}
@@ -60,7 +60,7 @@ func SanitizeOpenAIName(name string) string {
 // It truncates the prompt part if the total length exceeds maxLength.
 func MakeThreadName(username, prompt string, maxLength int) string {
 	prefix := fmt.Sprintf("Chat with %s: ", username)
-	if len(prompt) == 0 {
+	if prompt == "" {
 		prompt = "New Chat"
 	}
 
@@ -113,7 +113,7 @@ func SendLongMessage(s *session.Session, channelID discord.ChannelID, content st
 
 	var parts []string
 	remainingContent := content
-	for len(remainingContent) > 0 {
+	for remainingContent != "" {
 		if len(remainingContent) <= discordMaxMessageLength {
 			parts = append(parts, remainingContent)
 

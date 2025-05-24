@@ -1,3 +1,4 @@
+// Package commands provides slash command implementations for the Discord bot.
 package commands
 
 import (

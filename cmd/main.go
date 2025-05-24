@@ -1,3 +1,4 @@
+// Package main provides the entry point for the Discord ChatGPT bot application.
 package main
 
 import (
@@ -6,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/bot"
@@ -36,67 +38,76 @@ func (p *zapFxPrinter) LogEvent(event fxevent.Event) {
 	case *fxevent.OnStartExecuting:
 		p.logger.Debugf("HOOK OnStart executing: %s, function: %s", e.CallerName, e.FunctionName)
 	case *fxevent.OnStartExecuted:
-		if e.Err != nil {
-			p.logger.Errorf("HOOK OnStart failed: %s, function: %s, error: %v", e.CallerName, e.FunctionName, e.Err)
-		} else {
-			p.logger.Debugf("HOOK OnStart executed: %s, function: %s, runtime: %s", e.CallerName, e.FunctionName, e.Runtime)
-		}
+		p.logWithOptionalError("HOOK OnStart", e.CallerName, e.FunctionName, e.Err, e.Runtime.String())
 	case *fxevent.OnStopExecuting:
 		p.logger.Debugf("HOOK OnStop executing: %s, function: %s", e.CallerName, e.FunctionName)
 	case *fxevent.OnStopExecuted:
-		if e.Err != nil {
-			p.logger.Errorf("HOOK OnStop failed: %s, function: %s, error: %v", e.CallerName, e.FunctionName, e.Err)
-		} else {
-			p.logger.Debugf("HOOK OnStop executed: %s, function: %s, runtime: %s", e.CallerName, e.FunctionName, e.Runtime)
-		}
+		p.logWithOptionalError("HOOK OnStop", e.CallerName, e.FunctionName, e.Err, e.Runtime.String())
 	case *fxevent.Supplied:
-		if e.Err != nil {
-			p.logger.Errorf("SUPPLY failed: type: %s, error: %v", e.TypeName, e.Err)
-		} else {
-			p.logger.Debugf("SUPPLY: %s", e.TypeName)
-		}
+		p.logSuppliedOrProvided("SUPPLY", e.TypeName, "", e.Err)
 	case *fxevent.Provided:
-		if e.Err != nil {
-			p.logger.Errorf("PROVIDE failed: %v", e.Err)
-		} else {
-			p.logger.Debugf("PROVIDE: %s", e.OutputTypeNames)
-		}
+		p.logSuppliedOrProvided("PROVIDE", "", strings.Join(e.OutputTypeNames, ", "), e.Err)
 	case *fxevent.Invoking:
 		p.logger.Debugf("INVOKE: %s", e.FunctionName)
 	case *fxevent.Invoked:
-		if e.Err != nil {
-			p.logger.Errorf("INVOKE failed: %s, error: %v", e.FunctionName, e.Err)
-		} else {
-			p.logger.Debugf("INVOKE successful: %s", e.FunctionName)
-		}
+		p.logInvokeResult(e.FunctionName, e.Err)
 	case *fxevent.Stopping:
 		p.logger.Infof("STOPPING: %s", e.Signal)
 	case *fxevent.Stopped:
-		if e.Err != nil {
-			p.logger.Errorf("STOPPED with error: %v", e.Err)
-		} else {
-			p.logger.Info("STOPPED")
-		}
+		p.logSimpleWithError("STOPPED", e.Err)
 	case *fxevent.RollingBack:
 		p.logger.Errorf("ROLLING BACK: %v", e.StartErr)
 	case *fxevent.RolledBack:
-		if e.Err != nil {
-			p.logger.Errorf("ROLLED BACK with error: %v", e.Err)
-		}
+		p.logSimpleWithError("ROLLED BACK", e.Err)
 	case *fxevent.Started:
-		if e.Err != nil {
-			p.logger.Errorf("STARTED with error: %v", e.Err)
-		} else {
-			p.logger.Info("STARTED")
-		}
+		p.logSimpleWithError("STARTED", e.Err)
 	case *fxevent.LoggerInitialized:
-		if e.Err != nil {
-			p.logger.Errorf("LOGGER INITIALIZED with error: %v", e.Err)
-		} else {
-			p.logger.Debugf("LOGGER INITIALIZED: %s", e.ConstructorName)
-		}
+		p.logLoggerInitialized(e.ConstructorName, e.Err)
 	default:
 		p.logger.Debugf("UNKNOWN Fx event: %T", event)
+	}
+}
+
+func (p *zapFxPrinter) logWithOptionalError(action, caller, function string, err error, runtime string) {
+	if err != nil {
+		p.logger.Errorf("%s failed: %s, function: %s, error: %v", action, caller, function, err)
+	} else {
+		p.logger.Debugf("%s executed: %s, function: %s, runtime: %s", action, caller, function, runtime)
+	}
+}
+
+func (p *zapFxPrinter) logSuppliedOrProvided(action, typeName, outputTypes string, err error) {
+	switch {
+	case err != nil:
+		p.logger.Errorf("%s failed: type: %s, error: %v", action, typeName, err)
+	case typeName != "":
+		p.logger.Debugf("%s: %s", action, typeName)
+	default:
+		p.logger.Debugf("%s: %s", action, outputTypes)
+	}
+}
+
+func (p *zapFxPrinter) logInvokeResult(functionName string, err error) {
+	if err != nil {
+		p.logger.Errorf("INVOKE failed: %s, error: %v", functionName, err)
+	} else {
+		p.logger.Debugf("INVOKE successful: %s", functionName)
+	}
+}
+
+func (p *zapFxPrinter) logSimpleWithError(action string, err error) {
+	if err != nil {
+		p.logger.Errorf("%s with error: %v", action, err)
+	} else {
+		p.logger.Info(action)
+	}
+}
+
+func (p *zapFxPrinter) logLoggerInitialized(constructorName string, err error) {
+	if err != nil {
+		p.logger.Errorf("LOGGER INITIALIZED with error: %v", err)
+	} else {
+		p.logger.Debugf("LOGGER INITIALIZED: %s", constructorName)
 	}
 }
 

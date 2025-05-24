@@ -84,6 +84,8 @@ jobs:
           
           # Extract version from tag (e.g., v1.0.0 -> 1.0.0)
           VERSION="${{ github.ref_name }}"
+          # Strip 'v' prefix to match GoReleaser image tags
+          VERSION="${VERSION#v}"
           
           # Stop and remove existing container
           docker stop go-discord-chatgpt || true
@@ -144,41 +146,3 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-    
-    - name: Deploy snapshot to DigitalOcean
-      uses: appleboy/ssh-action@v1.0.0
-      with:
-        host: ${{ secrets.DO_HOST }}
-        username: ${{ secrets.DO_USERNAME }}
-        key: ${{ secrets.DO_SSH_PRIVATE_KEY }}
-        script: |
-          # Login to GitHub Container Registry
-          echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-          
-          # Get short commit SHA for deployment
-          COMMIT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          
-          # Stop and remove existing container
-          docker stop go-discord-chatgpt || true
-          docker rm go-discord-chatgpt || true
-          
-          # Pull snapshot image with commit SHA
-          docker pull ghcr.io/raikerian/go-discord-chatgpt:$COMMIT_SHA
-          
-          # Create config directory if it doesn't exist
-          mkdir -p /opt/go-discord-chatgpt
-          
-          # Create config.yaml from secret
-          echo "${{ secrets.BOT_CONFIG }}" > /opt/go-discord-chatgpt/config.yaml
-          
-          # Run new container with commit SHA version
-          docker run -d \
-            --name go-discord-chatgpt \
-            --restart unless-stopped \
-            --label "version=$COMMIT_SHA" \
-            --label "deployed=$(date -Iseconds)" \
-            -v /opt/go-discord-chatgpt/config.yaml:/app/config.yaml:ro \
-            ghcr.io/raikerian/go-discord-chatgpt:$COMMIT_SHA
-          
-          # Clean up old images
-          docker image prune -f

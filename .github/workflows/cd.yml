@@ -90,7 +90,7 @@ jobs:
           docker rm go-discord-chatgpt || true
           
           # Pull specific version image built by GoReleaser
-          docker pull ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]'):$VERSION
+          docker pull ghcr.io/raikerian/go-discord-chatgpt:$VERSION
           
           # Create config directory if it doesn't exist
           mkdir -p /opt/go-discord-chatgpt
@@ -105,7 +105,7 @@ jobs:
             --label "version=$VERSION" \
             --label "deployed=$(date -Iseconds)" \
             -v /opt/go-discord-chatgpt/config.yaml:/app/config.yaml:ro \
-            ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]'):$VERSION
+            ghcr.io/raikerian/go-discord-chatgpt:$VERSION
           
           # Clean up old images
           docker image prune -f
@@ -163,7 +163,7 @@ jobs:
           docker rm go-discord-chatgpt || true
           
           # Pull snapshot image with commit SHA
-          docker pull ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]'):$COMMIT_SHA
+          docker pull ghcr.io/raikerian/go-discord-chatgpt:$COMMIT_SHA
           
           # Create config directory if it doesn't exist
           mkdir -p /opt/go-discord-chatgpt
@@ -178,7 +178,7 @@ jobs:
             --label "version=$COMMIT_SHA" \
             --label "deployed=$(date -Iseconds)" \
             -v /opt/go-discord-chatgpt/config.yaml:/app/config.yaml:ro \
-            ghcr.io/$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]'):$COMMIT_SHA
+            ghcr.io/raikerian/go-discord-chatgpt:$COMMIT_SHA
           
           # Clean up old images
           docker image prune -f

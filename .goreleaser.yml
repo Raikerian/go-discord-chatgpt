@@ -30,8 +30,7 @@ builds:
 dockers:
   - image_templates:
       # Use commit SHA for snapshots, semantic version for releases
-      - "{{ if .IsSnapshot }}ghcr.io/raikerian/go-discord-chatgpt:{{ .ShortCommit }}{{ else }}ghcr.io/raikerian/go-discord-chatgpt:{{ .Version }}{{ end }}"
-      - "ghcr.io/raikerian/go-discord-chatgpt:latest"
+      - "ghcr.io/raikerian/go-discord-chatgpt:{{ if .IsSnapshot }}{{ .ShortCommit }}{{ else }}{{ .Version }}{{ end }}"
     dockerfile: Dockerfile.goreleaser
     use: buildx
     build_flag_templates:
@@ -46,6 +45,24 @@ dockers:
       - go.mod
       - go.sum
     goarch: amd64
+  # Separate configuration for latest tag on releases only
+  - image_templates:
+      - "ghcr.io/raikerian/go-discord-chatgpt:latest"
+    dockerfile: Dockerfile.goreleaser
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+    extra_files:
+      - go.mod
+      - go.sum
+    goarch: amd64
+    skip_push: "{{.IsSnapshot}}"
 
 archives:
   - id: go-discord-chatgpt

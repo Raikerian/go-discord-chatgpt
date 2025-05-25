@@ -1,8 +1,10 @@
 # Task Master Command Reference for GitHub Copilot
 
-This document provides GitHub Copilot with comprehensive knowledge of Task Master MCP tools and CLI commands for intelligent code assistance and workflow integration.
+This document provides comprehensive command reference for Task Master MCP tools and CLI commands.
 
-## Tool Categories
+## Command Categories Overview
+
+Task Master commands are organized into logical categories for different aspects of project management. Each command has both MCP tool and CLI variants - prefer MCP tools for better Copilot integration.
 
 ### Initialization & Setup
 

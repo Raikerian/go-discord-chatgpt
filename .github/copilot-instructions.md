@@ -4,35 +4,26 @@ This document provides instructions and context for GitHub Copilot to effectivel
 
 ## Task-Driven Development Integration
 
-This project uses **Task Master** for task-driven development workflows. When working on the project:
+This project uses **Task Master** for structured, AI-powered task management and development workflows.
 
-*   **Start work sessions** by checking current tasks with `get_tasks` or `f1e_get_tasks` MCP tools
-*   **Find the next task** using `next_task` or `f1e_next_task` to identify available work based on dependencies
-*   **Break down complex tasks** using `expand_task` or `f1e_expand_task` with `--research` for detailed subtask generation
-*   **Update task progress** by marking completed tasks with `set_task_status` or `f1e_set_task_status` to 'done'
-*   **Log implementation notes** using `update_subtask` or `f1e_update_subtask` during development for future reference
-*   **Validate dependencies** with `validate_dependencies` or `f1e_validate_dependencies` to ensure proper task ordering
+### Quick Start Workflow
+1. **Check Status**: Use `get_tasks` to see current project state
+2. **Find Work**: Use `next_task` to identify next actionable task based on dependencies
+3. **Break Down**: Use `expand_task` for complex tasks requiring detailed subtasks
+4. **Implement**: Code following task requirements and architectural patterns
+5. **Log Progress**: Use `update_subtask` to document implementation decisions
+6. **Complete**: Mark tasks 'done' with `set_task_status` when finished
 
-For comprehensive task management details, refer to the Task Master instructions in [`.github/instructions/taskmaster.instructions.md`](.github/instructions/taskmaster.instructions.md) and [`.github/instructions/taskmaster-commands.instructions.md`](.github/instructions/taskmaster-commands.instructions.md).
+### Key Tools (Prefer MCP over CLI)
+- **`get_tasks`** - List all tasks with status filtering
+- **`next_task`** - Find dependency-aware next available work
+- **`expand_task`** - Break complex tasks into actionable subtasks
+- **`update_subtask`** - Log implementation notes and progress
+- **`set_task_status`** - Update task completion status
 
-## Task Master Configuration
+*Note: Several tools use AI processing and may take 30-60 seconds. Always respect task dependencies.*
 
-Task Master is configured through two main mechanisms:
-
-### 1. `.taskmasterconfig` File (Primary)
-*   Located in the project root directory
-*   Stores AI model selections (main, research, fallback), parameters (max tokens, temperature), logging level, default subtasks/priority, project name
-*   **Managed via `models` MCP tool or `task-master models --setup` command**
-*   **View/Set specific models via `models` MCP tool**
-*   Created automatically when you run setup for the first time
-
-### 2. Environment Variables (`mcp.json`)
-*   Used **only** for sensitive API keys and specific endpoint URLs
-*   Place API keys in `.env` file in project root for CLI usage
-*   For MCP integration, configure keys in the `env` section of `.vscode/mcp.json`
-*   Available keys: `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, etc.
-
-**Important:** Non-API key settings are configured via `.taskmasterconfig`, not environment variables.
+**For detailed command reference and advanced workflows, see [`.github/instructions/taskmaster-commands.instructions.md`](.github/instructions/taskmaster-commands.instructions.md).**
 
 ## Project Overview
 

@@ -2,6 +2,38 @@
 
 This document provides instructions and context for GitHub Copilot to effectively assist with the development of the `go-discord-chatgpt` project.
 
+## Task-Driven Development Integration
+
+This project uses **Task Master** for task-driven development workflows. When working on the project:
+
+*   **Start work sessions** by checking current tasks with `get_tasks` or `f1e_get_tasks` MCP tools
+*   **Find the next task** using `next_task` or `f1e_next_task` to identify available work based on dependencies
+*   **Break down complex tasks** using `expand_task` or `f1e_expand_task` with `--research` for detailed subtask generation
+*   **Update task progress** by marking completed tasks with `set_task_status` or `f1e_set_task_status` to 'done'
+*   **Log implementation notes** using `update_subtask` or `f1e_update_subtask` during development for future reference
+*   **Validate dependencies** with `validate_dependencies` or `f1e_validate_dependencies` to ensure proper task ordering
+
+For comprehensive task management details, refer to the Task Master instructions in [`.github/instructions/taskmaster.instructions.md`](.github/instructions/taskmaster.instructions.md) and [`.github/instructions/taskmaster-commands.instructions.md`](.github/instructions/taskmaster-commands.instructions.md).
+
+## Task Master Configuration
+
+Task Master is configured through two main mechanisms:
+
+### 1. `.taskmasterconfig` File (Primary)
+*   Located in the project root directory
+*   Stores AI model selections (main, research, fallback), parameters (max tokens, temperature), logging level, default subtasks/priority, project name
+*   **Managed via `models` MCP tool or `task-master models --setup` command**
+*   **View/Set specific models via `models` MCP tool**
+*   Created automatically when you run setup for the first time
+
+### 2. Environment Variables (`mcp.json`)
+*   Used **only** for sensitive API keys and specific endpoint URLs
+*   Place API keys in `.env` file in project root for CLI usage
+*   For MCP integration, configure keys in the `env` section of `.vscode/mcp.json`
+*   Available keys: `ANTHROPIC_API_KEY`, `PERPLEXITY_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, etc.
+
+**Important:** Non-API key settings are configured via `.taskmasterconfig`, not environment variables.
+
 ## Project Overview
 
 `go-discord-chatgpt` is a Discord bot written in Go. It uses the Arikawa library for Discord API interaction, Uber Fx for dependency injection and application lifecycle management, and integrates with OpenAI's GPT models. The primary goal is to provide slash command functionalities, including interactions with ChatGPT, such as the `/chat` command.
@@ -187,6 +219,45 @@ go run cmd/main.go
     *   Employ `mockery` for generating mocks, but only when essential for test isolation. Prefer real implementations or test doubles where feasible.
     *   Ensure test files are named with the `_test.go` suffix and organized appropriately (e.g., in a `package <name>_test`).
     *   Fx's structure facilitates mocking dependencies when necessary.
+*   **Task-Driven Development**:
+    *   When implementing features, break work into specific, actionable subtasks using Task Master tools
+    *   Log implementation progress and decisions in subtask details for future reference
+    *   Update task status as work progresses ('pending' → 'in-progress' → 'done')
+    *   Respect task dependencies and priority ordering when selecting work
+    *   Use complexity analysis to determine appropriate subtask breakdown depth
+*   **Continuous Improvement**:
+    *   Monitor emerging code patterns and update documentation when new conventions are established
+    *   Add new rules or guidelines when patterns are used consistently across 3+ files
+    *   Update existing guidelines when better examples or edge cases are discovered
+    *   Remove or deprecate outdated patterns that no longer apply to the codebase
+
+## Documentation Maintenance Guidelines
+
+### Rule Improvement Triggers
+*   New code patterns not covered by existing rules
+*   Repeated similar implementations across files
+*   Common error patterns that could be prevented
+*   New libraries or tools being used consistently
+*   Emerging best practices in the codebase
+
+### Documentation Updates
+*   **Add New Guidelines When:**
+    *   A new technology/pattern is used in 3+ files
+    *   Common bugs could be prevented by a guideline
+    *   Code reviews repeatedly mention the same feedback
+    *   New security or performance patterns emerge
+
+*   **Modify Existing Guidelines When:**
+    *   Better examples exist in the codebase
+    *   Additional edge cases are discovered
+    *   Related guidelines have been updated
+    *   Implementation details have changed
+
+### Quality Checks
+*   Guidelines should be actionable and specific
+*   Examples should come from actual code
+*   References should be up to date
+*   Patterns should be consistently enforced
 
 ## Current Focus & Future Considerations
 
@@ -200,6 +271,47 @@ go run cmd/main.go
     *   Configuring DigitalOcean droplet with proper security and monitoring
     *   Implementing monitoring and observability for production deployments
     *   Establishing backup and disaster recovery procedures
+
+## Iterative Development Workflow
+
+When implementing features or fixes, follow this structured approach:
+
+### 1. Task Understanding & Planning
+*   Use `get_task` to thoroughly understand the specific goals and requirements
+*   Explore the codebase to identify precise files, functions, and code locations that need modification
+*   Determine intended code changes (diffs) and their locations
+*   Gather all relevant details from this exploration phase
+
+### 2. Implementation Logging
+*   Use `update_subtask` to log detailed implementation plans including:
+    *   File paths and line numbers for changes
+    *   Proposed diffs and reasoning
+    *   Potential challenges identified
+    *   Decisions made, especially if confirmed with user input
+*   Create a rich, timestamped log within the subtask's details
+
+### 3. Iterative Implementation
+*   Set subtask status to 'in-progress' using `set_task_status`
+*   Implement code following the logged plan
+*   **Regularly log progress** with `update_subtask` including:
+    *   What worked ("fundamental truths" discovered)
+    *   What didn't work and why (to avoid repeating mistakes)
+    *   Specific code snippets or configurations that were successful
+    *   Any deviations from the initial plan and reasoning
+
+### 4. Code Quality & Documentation Updates
+*   After functional completion, review all code changes and patterns
+*   Identify new or modified conventions established during implementation
+*   Update relevant documentation files in `.github/instructions/`
+*   Ensure new patterns are documented if used consistently
+
+### 5. Completion & Commit
+*   Mark subtask as 'done' after verification
+*   Create comprehensive Git commit messages summarizing:
+    *   Work done for the subtask
+    *   Code implementation details
+    *   Any documentation or rule adjustments
+*   Include changeset generation if needed for versioning
 
 ## CI/CD Pipeline Usage
 
@@ -239,3 +351,15 @@ See [`DEPLOYMENT.md`](DEPLOYMENT.md) for detailed setup instructions including:
 - Production deployment procedures
 
 This document should help Copilot understand the project's design and assist in a way that aligns with these established patterns.
+
+## Task Master Command Reference
+
+For detailed information about available Task Master MCP tools and CLI commands, including:
+*   Project initialization and setup
+*   Task creation, modification, and status management
+*   Task breakdown and complexity analysis
+*   Dependency management
+*   AI model configuration
+*   File generation and reporting
+
+Refer to the comprehensive reference in [`.github/instructions/taskmaster-commands.instructions.md`](.github/instructions/taskmaster-commands.instructions.md).

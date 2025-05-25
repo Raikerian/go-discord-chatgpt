@@ -3,6 +3,7 @@ module github.com/Raikerian/go-discord-chatgpt
 go 1.24.3
 
 require (
+	github.com/WqyJh/go-openai-realtime v0.5.0
 	github.com/diamondburned/arikawa/v3 v3.5.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/sashabaranov/go-openai v1.40.0
@@ -10,6 +11,7 @@ require (
 	go.uber.org/fx v1.24.0
 	go.uber.org/zap v1.27.0
 	gopkg.in/yaml.v3 v3.0.1
+	layeh.com/gopus v0.0.0-20210501142526-1ee02d434e32
 )
 
 require (
@@ -114,6 +116,7 @@ require (
 	github.com/chrismellard/docker-credential-acr-env v0.0.0-20230304212654-82a0ddb27589 // indirect
 	github.com/cloudflare/circl v1.3.8 // indirect
 	github.com/cncf/xds/go v0.0.0-20250326154945-ae57f3c0d45f // indirect
+	github.com/coder/websocket v1.8.12 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.16.3 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.6 // indirect
 	github.com/cyberphone/json-canonicalization v0.0.0-20231011164504-785e29786b46 // indirect

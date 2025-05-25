@@ -16,6 +16,7 @@ import (
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
 
+	// Import voice module
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
@@ -25,6 +26,9 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 	"go.uber.org/zap"
+
+	_ "github.com/WqyJh/go-openai-realtime"
+	_ "layeh.com/gopus"
 )
 
 // zapFxPrinter adapts a zap.SugaredLogger to fx.Printer interface.
@@ -202,6 +206,7 @@ func NewSession(params NewSessionParameters) (NewSessionResult, error) {
 
 	s := session.New("Bot " + params.Cfg.Discord.BotToken)
 
+	// Add base intents including voice states for voice functionality
 	s.AddIntents(gateway.IntentGuilds)
 	s.AddIntents(gateway.IntentGuildMessages)
 

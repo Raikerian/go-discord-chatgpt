@@ -106,7 +106,7 @@ jobs:
             --restart unless-stopped \
             --label "version=$VERSION" \
             --label "deployed=$(date -Iseconds)" \
-            -v /opt/go-discord-chatgpt/config.yaml:/config.yaml:ro \
+            -v /opt/go-discord-chatgpt/config.yaml:/app/config.yaml:ro \
             ghcr.io/raikerian/go-discord-chatgpt:$VERSION
 
   snapshot-build:

@@ -7,8 +7,8 @@ discord:
   bot_token: "YOUR_BOT_TOKEN_HERE"
 
   # Your Discord Application ID.
-  # Replace "YOUR_APPLICATION_ID_HERE" with your actual application ID.
-  application_id: "YOUR_APPLICATION_ID_HERE"
+  # Replace 123456789012345678 with your actual application ID (numeric value).
+  application_id: 123456789012345678
 
   # Optional: List of Guild (Server) IDs where commands should be registered.
   # If empty or omitted, commands will be registered globally.

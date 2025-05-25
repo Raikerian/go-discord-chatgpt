@@ -23,6 +23,7 @@ go.work
 
 ### Project ###
 config.yaml
+config-prod.yaml
 
 # Added by Claude Task Master
 # Logs

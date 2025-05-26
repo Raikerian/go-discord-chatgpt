@@ -37,7 +37,7 @@ jobs:
         version: v2.1.6
     
     - name: Build application
-      run: go build -v ./cmd/main.go
+      run: go build -v ./main.go
 
   goreleaser-check:
     runs-on: ubuntu-latest

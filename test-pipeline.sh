@@ -52,7 +52,7 @@ fi
 
 # Test 3: Build test
 echo "3. Testing local build..."
-if go build -o test-binary ./cmd/main.go; then
+if go build -o test-binary ./main.go; then
     success "Local build successful"
     rm -f test-binary
 else

@@ -9,7 +9,7 @@ before:
 
 builds:
   - id: go-discord-chatgpt
-    main: ./cmd/main.go
+    main: ./main.go
     binary: go-discord-chatgpt
     goos:
       - linux

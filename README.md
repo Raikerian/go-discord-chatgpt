@@ -51,7 +51,7 @@ A Discord bot built with Go, [Arikawa v3](https://github.com/diamondburned/arika
 
 5. Run the bot:
    ```bash
-   go run cmd/main.go
+   go run main.go
    ```
 
 ### Testing
@@ -70,7 +70,7 @@ golangci-lint run
 
 #### Local Build
 ```bash
-go build -o go-discord-chatgpt ./cmd/main.go
+go build -o go-discord-chatgpt ./main.go
 ```
 
 #### Using GoReleaser

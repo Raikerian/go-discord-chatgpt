@@ -2,29 +2,6 @@
 
 This document provides instructions and context for GitHub Copilot to effectively assist with the development of the `go-discord-chatgpt` project.
 
-## Task-Driven Development Integration
-
-This project uses **Task Master** for structured, AI-powered task management and development workflows.
-
-### Quick Start Workflow
-1. **Check Status**: Use `get_tasks` to see current project state
-2. **Find Work**: Use `next_task` to identify next actionable task based on dependencies
-3. **Break Down**: Use `expand_task` for complex tasks requiring detailed subtasks
-4. **Implement**: Code following task requirements and architectural patterns
-5. **Log Progress**: Use `update_subtask` to document implementation decisions
-6. **Complete**: Mark tasks 'done' with `set_task_status` when finished
-
-### Key Tools (Prefer MCP over CLI)
-- **`get_tasks`** - List all tasks with status filtering
-- **`next_task`** - Find dependency-aware next available work
-- **`expand_task`** - Break complex tasks into actionable subtasks
-- **`update_subtask`** - Log implementation notes and progress
-- **`set_task_status`** - Update task completion status
-
-*Note: Several tools use AI processing and may take 30-60 seconds. Always respect task dependencies.*
-
-**For detailed command reference and advanced workflows, see [`.github/instructions/taskmaster-commands.instructions.md`](.github/instructions/taskmaster-commands.instructions.md).**
-
 ## Project Overview
 
 `go-discord-chatgpt` is a Discord bot written in Go. It uses the Arikawa library for Discord API interaction, Uber Fx for dependency injection and application lifecycle management, and integrates with OpenAI's GPT models. The primary goal is to provide slash command functionalities, including interactions with ChatGPT, such as the `/chat` command.
@@ -120,7 +97,7 @@ This project uses **Task Master** for structured, AI-powered task management and
 2.  **Configuration Management**:
     *   Configuration is loaded from `config.yaml` into the `config.Config` struct ([`internal/config/config.go`](internal/config/config.go)).
     *   This includes Discord settings (bot token, app ID, guild IDs, interaction timeout) and OpenAI settings (API key, preferred models, message cache size, negative thread cache size, max concurrent requests).
-    *   The path to `config.yaml` is supplied to Fx in [`cmd/main.go`](cmd/main.go).
+    *   The path to `config.yaml` is supplied to Fx in [`main.go`](main.go).
     *   The `*config.Config` object is then available for injection into other components. For example, `discord.interaction_timeout_seconds` is used by the [`Bot`](internal/bot/bot.go) service, `openai.message_cache_size` configures the conversation store cache, and `openai.negative_thread_cache_size` configures the negative thread cache.
 
 3.  **Logging**:
@@ -137,7 +114,7 @@ This project uses **Task Master** for structured, AI-powered task management and
     *   **Dispatch**: The [`Bot`](internal/bot/bot.go) service ([`internal/bot/bot.go`](internal/bot/bot.go)) receives interaction create events from Arikawa. The [`handleInteraction`](internal/bot/handlers.go) function ([`internal/bot/handlers.go`](internal/bot/handlers.go)) uses the [`CommandManager`](internal/commands/command_loader.go) to find the appropriate command handler based on the interaction data and then executes it. The [`ChatCommand`](internal/commands/chat.go) delegates its core execution logic to the [`chat.Service`](internal/chat/service.go). Additionally, the bot handles thread message events via the [`handleMessageCreate`](internal/bot/handlers.go) function, which also delegates to the [`chat.Service`](internal/chat/service.go) for thread message processing.
 
 5.  **Discord Session**:
-    *   The Arikawa `*session.Session` is created and managed by Fx ([`NewSession`](cmd/main.go) in [`cmd/main.go`](cmd/main.go)).
+    *   The Arikawa `*session.Session` is created and managed by Fx ([`NewSession`](main.go) in [`main.go`](main.go)).
     *   Its lifecycle (Open/Close) is tied to Fx's OnStart/OnStop hooks.
     *   Intents are configured within the `NewSession` provider.
 
@@ -149,7 +126,7 @@ This project uses **Task Master** for structured, AI-powered task management and
     *   Tests for components like [`CommandManager`](internal/commands/command_loader.go) ([`internal/commands/command_loader_test.go`](internal/commands/command_loader_test.go)) utilize these practices.
 
 7.  **OpenAI Integration & Caching**:
-    *   **OpenAI Client**: An `*openai.Client` is created and managed by Fx ([`NewOpenAIClient`](cmd/main.go) in [`cmd/main.go`](cmd/main.go)), configured with the API key from `config.yaml`.
+    *   **OpenAI Client**: An `*openai.Client` is created and managed by Fx ([`NewOpenAIClient`](main.go) in [`main.go`](main.go)), configured with the API key from `config.yaml`.
     *   **Specialized Components**: Various specialized components for the chat system are now provided individually:
         *   [`gpt.MessagesCache`](internal/gpt/cache.go) - LRU cache for OpenAI message history, configured by `openai.message_cache_size`
         *   [`gpt.NegativeThreadCache`](internal/gpt/negative_cache.go) - LRU cache for threads to ignore, configured by `openai.negative_thread_cache_size`
@@ -210,12 +187,6 @@ go run cmd/main.go
     *   Employ `mockery` for generating mocks, but only when essential for test isolation. Prefer real implementations or test doubles where feasible.
     *   Ensure test files are named with the `_test.go` suffix and organized appropriately (e.g., in a `package <name>_test`).
     *   Fx's structure facilitates mocking dependencies when necessary.
-*   **Task-Driven Development**:
-    *   When implementing features, break work into specific, actionable subtasks using Task Master tools
-    *   Log implementation progress and decisions in subtask details for future reference
-    *   Update task status as work progresses ('pending' → 'in-progress' → 'done')
-    *   Respect task dependencies and priority ordering when selecting work
-    *   Use complexity analysis to determine appropriate subtask breakdown depth
 *   **Continuous Improvement**:
     *   Monitor emerging code patterns and update documentation when new conventions are established
     *   Add new rules or guidelines when patterns are used consistently across 3+ files
@@ -250,59 +221,29 @@ go run cmd/main.go
 *   References should be up to date
 *   Patterns should be consistently enforced
 
-## Current Focus & Future Considerations
-
-*   **Enhancing ChatGPT Commands**: Building upon the existing [`/chat`](internal/commands/chat.go) command and its underlying **[`chat.Service`](internal/chat/service.go)**, further refining context management (e.g., using the [`MessagesCache`](internal/gpt/cache.go) within the **[`chat.Service`](internal/chat/service.go)** more extensively for follow-up messages), prompt engineering capabilities, and exploring new GPT-powered features.
-*   **Voice and Realtime Features**: Exploring integration with OpenAI's Realtime API for voice conversations and real-time interactions using the `go-openai-realtime` library. This could enable voice commands, voice responses, and real-time conversational experiences in Discord voice channels.
-*   **Improving User Experience**: Continuously expanding error handling, providing clearer user feedback in Discord, especially for API interactions (like OpenAI calls managed by the **[`chat.Service`](internal/chat/service.go)** for the [`ChatCommand`](internal/commands/chat.go)) and longer operations.
-*   **Comprehensive Testing**: Increasing test coverage, particularly with integration tests for command flows involving OpenAI and other external services. The [`ChatCommand`](internal/commands/chat.go) and particularly the **[`chat.Service`](internal/chat/service.go)** are key candidates for such tests.
-*   **Configuration Flexibility**: Exploring more dynamic configuration options or in-Discord configuration commands.
-*   **Production Deployment**: The CI/CD pipeline is fully implemented and ready for production use. Key next steps include:
-    *   Setting up GitHub repository secrets for automated deployment
-    *   Configuring DigitalOcean droplet with proper security and monitoring
-    *   Implementing monitoring and observability for production deployments
-    *   Establishing backup and disaster recovery procedures
-
 ## Iterative Development Workflow
 
 When implementing features or fixes, follow this structured approach:
 
-### 1. Task Understanding & Planning
-*   Use `get_task` to thoroughly understand the specific goals and requirements
+### 1. Feature Understanding & Planning
+*   Thoroughly understand the specific goals and requirements
 *   Explore the codebase to identify precise files, functions, and code locations that need modification
 *   Determine intended code changes (diffs) and their locations
 *   Gather all relevant details from this exploration phase
 
-### 2. Implementation Logging
-*   Use `update_subtask` to log detailed implementation plans including:
+### 2. Implementation Documentation
+*   Document detailed implementation plans including:
     *   File paths and line numbers for changes
     *   Proposed diffs and reasoning
     *   Potential challenges identified
     *   Decisions made, especially if confirmed with user input
-*   Create a rich, timestamped log within the subtask's details
+*   Create a rich log of implementation decisions
 
-### 3. Iterative Implementation
-*   Set subtask status to 'in-progress' using `set_task_status`
-*   Implement code following the logged plan
-*   **Regularly log progress** with `update_subtask` including:
-    *   What worked ("fundamental truths" discovered)
-    *   What didn't work and why (to avoid repeating mistakes)
-    *   Specific code snippets or configurations that were successful
-    *   Any deviations from the initial plan and reasoning
-
-### 4. Code Quality & Documentation Updates
+### 3. Code Quality & Documentation Updates
 *   After functional completion, review all code changes and patterns
 *   Identify new or modified conventions established during implementation
 *   Update relevant documentation files in `.github/instructions/`
 *   Ensure new patterns are documented if used consistently
-
-### 5. Completion & Commit
-*   Mark subtask as 'done' after verification
-*   Create comprehensive Git commit messages summarizing:
-    *   Work done for the subtask
-    *   Code implementation details
-    *   Any documentation or rule adjustments
-*   Include changeset generation if needed for versioning
 
 ## CI/CD Pipeline Usage
 
@@ -342,15 +283,3 @@ See [`DEPLOYMENT.md`](DEPLOYMENT.md) for detailed setup instructions including:
 - Production deployment procedures
 
 This document should help Copilot understand the project's design and assist in a way that aligns with these established patterns.
-
-## Task Master Command Reference
-
-For detailed information about available Task Master MCP tools and CLI commands, including:
-*   Project initialization and setup
-*   Task creation, modification, and status management
-*   Task breakdown and complexity analysis
-*   Dependency management
-*   AI model configuration
-*   File generation and reporting
-
-Refer to the comprehensive reference in [`.github/instructions/taskmaster-commands.instructions.md`](.github/instructions/taskmaster-commands.instructions.md).

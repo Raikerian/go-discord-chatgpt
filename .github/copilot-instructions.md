@@ -16,7 +16,8 @@ This document provides instructions and context for GitHub Copilot to effectivel
 *   **Testify (mock, require, assert)**: For writing unit tests and making assertions.
 *   **Mockery (vektra/mockery)**: For generating mock implementations of interfaces, configured via `.mockery.yml`.
 *   **go-openai (sashabaranov/go-openai)**: Go client library for the OpenAI API.
-*   **go-openai-realtime (WqyJh/go-openai-realtime)**: Go SDK for OpenAI Realtime API enabling real-time voice and text conversations. (See also: [`go-openai-realtime.instructions.md`](.github/instructions/go-openai-realtime.instructions.md) for detailed guidance on using the OpenAI Realtime API for voice features).
+*   **go-openai-realtime (WqyJh/go-openai-realtime)**: Go SDK for OpenAI Realtime API enabling real-time voice and text conversations. (See also: [`go-openai-realtime.instructions.md`](.github/instructions/go-openai-realtime.instructions.md) for detailed guidance on using the OpenAI Realtime API for voice features). **Note**: Currently imported as a dependency but voice features are not yet implemented in the codebase.
+*   **layeh.com/gopus**: Opus audio codec library for Go, used for audio processing in voice features. **Note**: Currently imported but not yet utilized in active voice functionality.
 *   **golang-lru (hashicorp/golang-lru/v2)**: LRU cache implementation, used for caching OpenAI message history.
 *   **GoReleaser v2**: Professional release management tool for building, packaging, and releasing Go applications with multi-architecture support.
 *   **GitHub Actions**: CI/CD automation platform for testing, building, and deploying the application.
@@ -49,9 +50,11 @@ This document provides instructions and context for GitHub Copilot to effectivel
 │   │   └── deploy.sh       # Production deployment script for DigitalOcean
 │   ├── instructions/
 │   │   ├── arikawa.instructions.md    # Arikawa-specific development guidelines
+│   │   ├── go-openai-realtime.instructions.md # OpenAI Realtime API development guidelines
 │   │   └── golang.instructions.md    # Go best practices and conventions
-├── cmd/
-│   └── main.go             # Main application entry point, Fx setup, and lifecycle management
+│   ├── prompts/                # Empty directory (reserved for future AI prompts)
+│   └── copilot-instructions.md # This document - GitHub Copilot development instructions
+├── main.go                  # Main application entry point, Fx setup, and lifecycle management
 ├── internal/
 │   ├── bot/
 │   │   ├── bot.go          # Core bot service, handles startup/shutdown logic, interaction event routing
@@ -91,24 +94,24 @@ This document provides instructions and context for GitHub Copilot to effectivel
         *   [`chat.DiscordInteractionManager`](internal/chat/interaction_manager.go) - Handles Discord API interactions
         *   [`chat.ModelSelector`](internal/chat/model_selector.go) - Selects appropriate AI models
         *   [`chat.SummaryParser`](internal/chat/summary_parser.go) - Parses thread summary messages
-    *   Providers for these components are defined in `cmd/main.go` using a modular approach where the [`chat.ConversationStore`](internal/chat/conversation_store.go) is created via a custom provider function (`newConversationStoreProvider`) that combines multiple dependencies.
+    *   Providers for these components are defined in `main.go` using a modular approach where the [`chat.ConversationStore`](internal/chat/conversation_store.go) is created via a custom provider function (`newConversationStoreProvider`) that combines multiple dependencies.
     *   Fx handles the lifecycle (start/stop) of these components. For example, the Discord session is opened on start and closed on stop, and commands are registered/unregistered accordingly.
 
 2.  **Configuration Management**:
     *   Configuration is loaded from `config.yaml` into the `config.Config` struct ([`internal/config/config.go`](internal/config/config.go)).
     *   This includes Discord settings (bot token, app ID, guild IDs, interaction timeout) and OpenAI settings (API key, preferred models, message cache size, negative thread cache size, max concurrent requests).
-    *   The path to `config.yaml` is supplied to Fx in [`main.go`](main.go).
+    *   The path to `config.yaml` is supplied to Fx in [`main.go`](main.go). The default path is `"../config.yaml"` but this can be overridden by environment variables or flags if needed.
     *   The `*config.Config` object is then available for injection into other components. For example, `discord.interaction_timeout_seconds` is used by the [`Bot`](internal/bot/bot.go) service, `openai.message_cache_size` configures the conversation store cache, and `openai.negative_thread_cache_size` configures the negative thread cache.
 
 3.  **Logging**:
     *   Zap is used for structured logging.
     *   A `*zap.Logger` is configured and provided by Fx.
-    *   Fx's internal logging is also adapted to use this Zap logger via the `zapFxPrinter` in `cmd/main.go`.
+    *   Fx's internal logging is also adapted to use this Zap logger via the `zapFxPrinter` in `main.go`.
 
 4.  **Command Handling**:
     *   **Interface**: All slash commands implement the `commands.Command` interface defined in `internal/commands/command.go`. This interface specifies methods like `Name()`, `Description()`, `Options()`, and `Execute()`.
     *   **Constructors & Fx Groups**: Each command (e.g., [`PingCommand`](internal/commands/ping.go), [`VersionCommand`](internal/commands/version.go), [`ChatCommand`](internal/commands/chat.go)) has a constructor function (e.g., `NewPingCommand() commands.Command`). The [`ChatCommand`](internal/commands/chat.go) now takes the [`chat.Service`](internal/chat/service.go) as a dependency.
-    *   **Fx Provisioning**: These constructors are provided to Fx in `cmd/main.go` and tagged with `fx.ResultTags(\`group:"commands"\`)`.
+    *   **Fx Provisioning**: These constructors are provided to Fx in `main.go` and tagged with `fx.ResultTags(\`group:"commands"\`)`.
     *   **CommandManager**: The [`commands.CommandManager`](internal/commands/command_loader.go) ([`internal/commands/command_loader.go`](internal/commands/command_loader.go)) receives all [`commands.Command`](internal/commands/command.go) implementations from the "commands" Fx group.
     *   **Registration**: On startup, [`CommandManager.RegisterCommands()`](internal/commands/command_loader.go) iterates through the loaded commands and registers them with Discord (globally or for specific guilds listed in `config.yaml`). It unregisters them on shutdown.
     *   **Dispatch**: The [`Bot`](internal/bot/bot.go) service ([`internal/bot/bot.go`](internal/bot/bot.go)) receives interaction create events from Arikawa. The [`handleInteraction`](internal/bot/handlers.go) function ([`internal/bot/handlers.go`](internal/bot/handlers.go)) uses the [`CommandManager`](internal/commands/command_loader.go) to find the appropriate command handler based on the interaction data and then executes it. The [`ChatCommand`](internal/commands/chat.go) delegates its core execution logic to the [`chat.Service`](internal/chat/service.go). Additionally, the bot handles thread message events via the [`handleMessageCreate`](internal/bot/handlers.go) function, which also delegates to the [`chat.Service`](internal/chat/service.go) for thread message processing.
@@ -158,12 +161,12 @@ golangci-lint run
 
 ### Building the Application
 ```bash
-go build -o go-discord-chatgpt ./cmd/main.go
+go build -o go-discord-chatgpt main.go
 ```
 
 ### Running the Bot Locally
 ```bash
-go run cmd/main.go
+go run main.go
 ```
 
 ## Development Guidelines & Preferences
@@ -174,6 +177,7 @@ go run cmd/main.go
 *   **Commenting**: Avoid redundant and long comments. Only comment where necessary to explain complex logic or non-obvious decisions.
 *   **Error Handling**: Handle errors explicitly. Fx's lifecycle management will also report errors during startup/shutdown.
 *   **Configuration-Driven**: Make behavior configurable via [`config.yaml`](config.yaml) where appropriate (e.g., guild IDs, OpenAI models, cache size, interaction timeouts).
+*   **Voice Features**: While `go-openai-realtime` and `layeh.com/gopus` are imported as dependencies, voice functionality is not yet implemented. Future voice feature development should leverage the existing documentation in [`go-openai-realtime.instructions.md`](.github/instructions/go-openai-realtime.instructions.md) and follow the modular chat service architecture.
 *   **Go Best Practices**: Adhere to the guidelines outlined in [`golang.instructions.md`](.github/instructions/golang.instructions.md) for consistent and high-quality Go code.
 *   **CI/CD & Deployment**:
     *   Use GoReleaser v2 for professional release management and multi-architecture builds.

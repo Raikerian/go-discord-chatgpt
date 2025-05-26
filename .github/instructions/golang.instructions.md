@@ -5,6 +5,14 @@ applyTo: '**/*.go'
 
 This document outlines best practices for writing Go code, drawing from Google's Go Style Guide and Effective Go.
 
+## Documentation and API Reference
+
+*   **Go Doc Command**: Use the `go doc <package>` command to access comprehensive API documentation for any Go package, including interfaces, types, functions, and usage examples. This works for both standard library packages and third-party dependencies.
+    *   Examples: `go doc fmt`, `go doc context`, `go doc github.com/gin-gonic/gin`
+    *   For specific symbols: `go doc package.Symbol` (e.g., `go doc fmt.Printf`)
+    *   For detailed documentation: `go doc -all package` to see all exported symbols
+*   **Godoc Server**: Run `godoc -http=:6060` locally to browse documentation in a web interface, or use `go doc -http=:6060` in newer Go versions.
+
 ## Naming
 
 *   **Package Names**: Use short, concise, all-lowercase names. Avoid underscores or camelCase. The name should be the default for imports. E.g., `package http` not `package http_utils`.
@@ -149,11 +157,12 @@ This document outlines best practices for writing Go code, drawing from Google's
 *   **`testing/iotest`**: Provides utilities for testing I/O, such as `iotest.ErrReader`.
 *   **`testing/httptest`**: Provides utilities for HTTP testing, such as `httptest.NewServer` and `httptest.NewRecorder`.
 *   **Mocks and Fakes**: Use them judiciously. Prefer testing with real components where feasible and not too complex. When needed, use mocks or fakes to isolate the unit under test from its dependencies or to simulate specific conditions (e.g., network errors).
-*   **Assertion Libraries**: While the standard library's `testing` package is sufficient (e.g., `if got != want { t.Errorf(...) }`), external libraries like `testify/assert` or `testify/require` can reduce boilerplate for common assertions. (This project uses `testify`).
+*   **Assertion Libraries**: While the standard library's `testing` package is sufficient (e.g., `if got != want { t.Errorf(...) }`), external libraries like `testify/assert` or `testify/require` can reduce boilerplate for common assertions. Use `go doc` to explore the API of testing libraries. (This project uses `testify`).
 *   **Coverage**: Aim for good test coverage. Use `go test -cover`.
 
 ## Miscellaneous
 
+*   **Library Documentation**: When working with third-party libraries, use `go doc <package>` to understand their APIs, interfaces, and usage patterns before implementation.
 *   **Avoid Global State**: Minimize reliance on global variables. If necessary, provide them through dependency injection or make them configurable.
 *   **String Concatenation**: For building strings iteratively, `strings.Builder` is generally more efficient than repeated `+` or `+=`. `fmt.Sprintf` is fine for simple cases.
 *   **Embedding**: Use struct embedding for composition, to "borrow" fields and methods.

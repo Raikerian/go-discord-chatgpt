@@ -8,15 +8,17 @@ This document provides instructions and context for GitHub Copilot to effectivel
 
 ## Key Technologies & Libraries
 
+**API Documentation**: For all Go libraries and packages, use the `go doc <package>` command to access comprehensive API documentation, interfaces, types, and usage examples. This includes both standard library packages and third-party dependencies.
+
 *   **Go**: The primary programming language.
-*   **Arikawa (v3)**: Go library for the Discord API. Used for session management, event handling, and command registration. (See also: [`arikawa.instructions.md`](.github/instructions/arikawa.instructions.md) for detailed guidance on using Arikawa).
+*   **Arikawa (v3)**: Go library for the Discord API. Used for session management, event handling, and command registration.
 *   **Uber Fx**: Dependency injection framework. Manages the application's lifecycle and the creation and wiring of components (services, configuration, logger, OpenAI client, cache, etc.).
 *   **Zap**: Structured logging library. Used for all application logging, including Fx's internal logs.
 *   **YAML V3**: For parsing the `config.yaml` file.
 *   **Testify (mock, require, assert)**: For writing unit tests and making assertions.
 *   **Mockery (vektra/mockery)**: For generating mock implementations of interfaces, configured via `.mockery.yml`.
 *   **go-openai (sashabaranov/go-openai)**: Go client library for the OpenAI API.
-*   **go-openai-realtime (WqyJh/go-openai-realtime)**: Go SDK for OpenAI Realtime API enabling real-time voice and text conversations. (See also: [`go-openai-realtime.instructions.md`](.github/instructions/go-openai-realtime.instructions.md) for detailed guidance on using the OpenAI Realtime API for voice features). **Note**: Currently imported as a dependency but voice features are not yet implemented in the codebase.
+*   **go-openai-realtime (WqyJh/go-openai-realtime)**: Go SDK for OpenAI Realtime API enabling real-time voice and text conversations. **Note**: Currently imported as a dependency but voice features are not yet implemented in the codebase.
 *   **layeh.com/gopus**: Opus audio codec library for Go, used for audio processing in voice features. **Note**: Currently imported but not yet utilized in active voice functionality.
 *   **golang-lru (hashicorp/golang-lru/v2)**: LRU cache implementation, used for caching OpenAI message history.
 *   **GoReleaser v2**: Professional release management tool for building, packaging, and releasing Go applications with multi-architecture support.
@@ -49,8 +51,6 @@ This document provides instructions and context for GitHub Copilot to effectivel
 │   ├── scripts/
 │   │   └── deploy.sh       # Production deployment script for DigitalOcean
 │   ├── instructions/
-│   │   ├── arikawa.instructions.md    # Arikawa-specific development guidelines
-│   │   ├── go-openai-realtime.instructions.md # OpenAI Realtime API development guidelines
 │   │   └── golang.instructions.md    # Go best practices and conventions
 │   ├── prompts/                # Empty directory (reserved for future AI prompts)
 │   └── copilot-instructions.md # This document - GitHub Copilot development instructions
@@ -177,7 +177,7 @@ go run main.go
 *   **Commenting**: Avoid redundant and long comments. Only comment where necessary to explain complex logic or non-obvious decisions.
 *   **Error Handling**: Handle errors explicitly. Fx's lifecycle management will also report errors during startup/shutdown.
 *   **Configuration-Driven**: Make behavior configurable via [`config.yaml`](config.yaml) where appropriate (e.g., guild IDs, OpenAI models, cache size, interaction timeouts).
-*   **Voice Features**: While `go-openai-realtime` and `layeh.com/gopus` are imported as dependencies, voice functionality is not yet implemented. Future voice feature development should leverage the existing documentation in [`go-openai-realtime.instructions.md`](.github/instructions/go-openai-realtime.instructions.md) and follow the modular chat service architecture.
+*   **Voice Features**: While `go-openai-realtime` and `layeh.com/gopus` are imported as dependencies, voice functionality is not yet implemented. Future voice feature development should use `go doc` to access API documentation for these packages and follow the modular chat service architecture.
 *   **Go Best Practices**: Adhere to the guidelines outlined in [`golang.instructions.md`](.github/instructions/golang.instructions.md) for consistent and high-quality Go code.
 *   **CI/CD & Deployment**:
     *   Use GoReleaser v2 for professional release management and multi-architecture builds.

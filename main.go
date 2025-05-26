@@ -393,7 +393,7 @@ var Module = fx.Options(
 
 func main() {
 	// Set a default config path. This can be overridden by environment variables or flags if needed.
-	configPath := "../config.yaml"
+	configPath := "config.yaml"
 
 	app := fx.New(
 		Module, // Use the defined module

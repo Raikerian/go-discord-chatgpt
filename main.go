@@ -16,7 +16,7 @@ import (
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
 
-	// Import voice module
+	// Import voice module.
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
@@ -26,9 +26,6 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/fx/fxevent"
 	"go.uber.org/zap"
-
-	_ "github.com/WqyJh/go-openai-realtime"
-	_ "layeh.com/gopus"
 )
 
 // zapFxPrinter adapts a zap.SugaredLogger to fx.Printer interface.

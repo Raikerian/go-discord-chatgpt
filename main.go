@@ -11,7 +11,7 @@ import (
 	"syscall"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/bot"
-	"github.com/Raikerian/go-discord-chatgpt/internal/chat" // Import the new chat service
+	"github.com/Raikerian/go-discord-chatgpt/internal/chat"
 	"github.com/Raikerian/go-discord-chatgpt/internal/commands"
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"

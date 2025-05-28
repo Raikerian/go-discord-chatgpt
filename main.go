@@ -328,6 +328,7 @@ var Module = fx.Options(
 		newConversationStoreProvider,
 		chat.NewModelSelector,
 		chat.NewSummaryParser,
+		chat.NewOpenAITitleGenerator,
 
 		// Chat Service
 		chat.NewService,

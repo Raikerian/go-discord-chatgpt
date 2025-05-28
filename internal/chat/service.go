@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 
+	"github.com/diamondburned/arikawa/v3/api"
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
@@ -15,6 +17,11 @@ import (
 
 	"go.uber.org/zap"
 )
+
+// ThreadTitleGenerator defines the interface for generating thread titles based on conversation context.
+type ThreadTitleGenerator interface {
+	GenerateTitle(ctx context.Context, messages []openai.ChatCompletionMessage) (string, error)
+}
 
 // Service orchestrates chat interactions by coordinating various specialized services.
 type Service struct {
@@ -26,6 +33,7 @@ type Service struct {
 	aiProvider         AIProvider
 	conversationStore  ConversationStore
 	modelSelector      ModelSelector
+	titleGenerator     ThreadTitleGenerator
 
 	// ongoingRequests stores cancel functions for ongoing OpenAI requests per thread.
 	// key: discord.ChannelID, value: context.CancelFunc
@@ -45,6 +53,7 @@ func NewService(
 	aiProvider AIProvider,
 	conversationStore ConversationStore,
 	modelSelector ModelSelector,
+	titleGenerator ThreadTitleGenerator,
 ) *Service {
 	return &Service{
 		logger:             logger.Named("chat_service_orchestrator"),
@@ -54,6 +63,7 @@ func NewService(
 		aiProvider:         aiProvider,
 		conversationStore:  conversationStore,
 		modelSelector:      modelSelector,
+		titleGenerator:     titleGenerator,
 	}
 }
 
@@ -147,7 +157,11 @@ func (s *Service) HandleChatInteraction(ctx context.Context, e *gateway.Interact
 
 	if err := s.interactionManager.SendMessage(s.ses, newThread.ID, aiMessageContent); err != nil {
 		s.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", newThread.ID.String()))
+		return fmt.Errorf("failed to send AI response to Discord: %w", err)
 	}
+
+	// Generate thread title asynchronously after successful AI response
+	go s.generateAndUpdateThreadTitle(context.Background(), newThread.ID, messages, aiResponse.Choices[0].Message)
 
 	s.conversationStore.StoreInitialConversation(newThread.ID.String(), userPrompt, aiMessageContent, modelToUse, userDisplayName, botDisplayName, SanitizeOpenAIName)
 
@@ -307,6 +321,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 	// Send response to Discord
 	if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, aiMessageContent); sendErr != nil {
 		s.logger.Error("Failed to send AI response to thread", zap.Error(sendErr), zap.String("threadID", threadIDStr))
+		return fmt.Errorf("failed to send AI response to Discord: %w", sendErr)
 	}
 
 	// 7. Add AI response to cache (with validation)
@@ -337,6 +352,45 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		zap.Int("finalMessageCount", len(finalMessages)))
 
 	return nil
+}
+
+// generateAndUpdateThreadTitle generates a title for the thread based on the conversation
+// and updates the Discord thread name asynchronously.
+func (s *Service) generateAndUpdateThreadTitle(ctx context.Context, threadID discord.ChannelID, userMessages []openai.ChatCompletionMessage, aiResponse openai.ChatCompletionMessage) {
+	// Build the complete conversation for title generation
+	allMessages := append(userMessages, aiResponse)
+
+	title, err := s.titleGenerator.GenerateTitle(ctx, allMessages)
+	if err != nil {
+		s.logger.Warn("Failed to generate thread title",
+			zap.Error(err),
+			zap.String("threadID", threadID.String()))
+		return
+	}
+
+	// Clean up and validate the title
+	title = strings.TrimSpace(title)
+	if title == "" {
+		s.logger.Warn("Generated thread title is empty",
+			zap.String("threadID", threadID.String()))
+		return
+	}
+
+	// Update the Discord thread name using arikawa v3 API
+	err = s.ses.ModifyChannel(threadID, api.ModifyChannelData{
+		Name: title,
+	})
+	if err != nil {
+		s.logger.Warn("Failed to update thread name",
+			zap.Error(err),
+			zap.String("threadID", threadID.String()),
+			zap.String("title", title))
+		return
+	}
+
+	s.logger.Info("Successfully updated thread title",
+		zap.String("threadID", threadID.String()),
+		zap.String("title", title))
 }
 
 // Helper methods for getting bot display name, etc.

@@ -2,7 +2,6 @@ package gpt
 
 import (
 	lru "github.com/hashicorp/golang-lru/v2"
-	"go.uber.org/fx"
 )
 
 // NegativeThreadCache holds the LRU cache for thread IDs that should be ignored.
@@ -10,23 +9,19 @@ type NegativeThreadCache struct {
 	*lru.Cache[string, bool] // Using string for thread ID and bool as a placeholder value
 }
 
-// NegativeThreadCacheParams holds the dependencies for creating a new NegativeThreadCache.
-type NegativeThreadCacheParams struct {
-	fx.In
-	Size int `name:"negativeThreadCacheSize"`
-}
-
 // NewNegativeThreadCache creates a new NegativeThreadCache with the given size.
 // The size parameter determines the maximum number of items the cache can hold.
-func NewNegativeThreadCache(params NegativeThreadCacheParams) (*NegativeThreadCache, error) {
-	lruCache, err := lru.New[string, bool](params.Size)
+func NewNegativeThreadCache(size int) NegativeThreadCache {
+	lruCache, err := lru.New[string, bool](size)
 	if err != nil {
-		return nil, err
+		// This should never happen with a valid size, but we'll panic if it does
+		// since this is a programming error
+		panic(err)
 	}
 
-	return &NegativeThreadCache{
+	return NegativeThreadCache{
 		Cache: lruCache,
-	}, nil
+	}
 }
 
 // Add adds a thread ID to the cache.

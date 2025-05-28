@@ -53,11 +53,13 @@ func (g *OpenAITitleGenerator) GenerateTitle(ctx context.Context, messages []ope
 	)
 	if err != nil {
 		g.logger.Warn("Failed to generate title via OpenAI", zap.Error(err))
+
 		return "", err
 	}
 
 	if len(resp.Choices) == 0 {
 		g.logger.Warn("OpenAI returned no choices for title generation")
+
 		return "", nil
 	}
 

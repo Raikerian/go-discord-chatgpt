@@ -45,23 +45,14 @@ func NewConversationStore(
 	negativeThreadCacheSize int,
 	summaryParser SummaryParser,
 ) ConversationStore {
-	// Create caches directly using the LRU library
-	messagesCache, err := gpt.NewMessagesCache(gpt.MessagesCacheParams{Size: messageCacheSize})
-	if err != nil {
-		// This should not happen in practice since the only error case is negative size
-		logger.Panic("Failed to create messages cache", zap.Error(err))
-	}
-
-	negativeThreadCache, err := gpt.NewNegativeThreadCache(gpt.NegativeThreadCacheParams{Size: negativeThreadCacheSize})
-	if err != nil {
-		// This should not happen in practice since the only error case is negative size
-		logger.Panic("Failed to create negative thread cache", zap.Error(err))
-	}
+	// Create caches directly using the new constructors
+	messagesCache := gpt.NewMessagesCache(messageCacheSize)
+	negativeThreadCache := gpt.NewNegativeThreadCache(negativeThreadCacheSize)
 
 	return &cacheBasedConversationStore{
 		logger:              logger.Named("conversation_store"),
-		messagesCache:       messagesCache,
-		negativeThreadCache: negativeThreadCache,
+		messagesCache:       &messagesCache,
+		negativeThreadCache: &negativeThreadCache,
 		summaryParser:       summaryParser,
 	}
 }

@@ -4,7 +4,6 @@ package gpt
 import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/sashabaranov/go-openai"
-	"go.uber.org/fx"
 )
 
 // MessagesCache holds the LRU cache for chat messages.
@@ -21,23 +20,19 @@ type MessagesCacheData struct {
 	TokenCount    int
 }
 
-// MessagesCacheParams holds the dependencies for creating a new MessagesCache.
-type MessagesCacheParams struct {
-	fx.In
-	Size int `name:"messageCacheSize"`
-}
-
 // NewMessagesCache creates a new MessagesCache with the given size.
 // The size parameter determines the maximum number of items the cache can hold.
-func NewMessagesCache(params MessagesCacheParams) (*MessagesCache, error) {
-	lruCache, err := lru.New[string, *MessagesCacheData](params.Size)
+func NewMessagesCache(size int) MessagesCache {
+	lruCache, err := lru.New[string, *MessagesCacheData](size)
 	if err != nil {
-		return nil, err
+		// This should never happen with a valid size, but we'll panic if it does
+		// since this is a programming error
+		panic(err)
 	}
 
-	return &MessagesCache{
+	return MessagesCache{
 		Cache: lruCache,
-	}, nil
+	}
 }
 
 // Add adds a value to the cache.

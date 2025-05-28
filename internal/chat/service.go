@@ -157,11 +157,12 @@ func (s *Service) HandleChatInteraction(ctx context.Context, e *gateway.Interact
 
 	if err := s.interactionManager.SendMessage(s.ses, newThread.ID, aiMessageContent); err != nil {
 		s.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", newThread.ID.String()))
+
 		return fmt.Errorf("failed to send AI response to Discord: %w", err)
 	}
 
 	// Generate thread title asynchronously after successful AI response
-	go s.generateAndUpdateThreadTitle(context.Background(), newThread.ID, messages, aiResponse.Choices[0].Message)
+	go s.generateAndUpdateThreadTitle(context.Background(), newThread.ID, messages, &aiResponse.Choices[0].Message)
 
 	s.conversationStore.StoreInitialConversation(newThread.ID.String(), userPrompt, aiMessageContent, modelToUse, userDisplayName, botDisplayName, SanitizeOpenAIName)
 
@@ -321,6 +322,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 	// Send response to Discord
 	if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, aiMessageContent); sendErr != nil {
 		s.logger.Error("Failed to send AI response to thread", zap.Error(sendErr), zap.String("threadID", threadIDStr))
+
 		return fmt.Errorf("failed to send AI response to Discord: %w", sendErr)
 	}
 
@@ -356,15 +358,16 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 
 // generateAndUpdateThreadTitle generates a title for the thread based on the conversation
 // and updates the Discord thread name asynchronously.
-func (s *Service) generateAndUpdateThreadTitle(ctx context.Context, threadID discord.ChannelID, userMessages []openai.ChatCompletionMessage, aiResponse openai.ChatCompletionMessage) {
+func (s *Service) generateAndUpdateThreadTitle(ctx context.Context, threadID discord.ChannelID, userMessages []openai.ChatCompletionMessage, aiResponse *openai.ChatCompletionMessage) {
 	// Build the complete conversation for title generation
-	allMessages := append(userMessages, aiResponse)
+	allMessages := append(userMessages, *aiResponse)
 
 	title, err := s.titleGenerator.GenerateTitle(ctx, allMessages)
 	if err != nil {
 		s.logger.Warn("Failed to generate thread title",
 			zap.Error(err),
 			zap.String("threadID", threadID.String()))
+
 		return
 	}
 
@@ -373,6 +376,7 @@ func (s *Service) generateAndUpdateThreadTitle(ctx context.Context, threadID dis
 	if title == "" {
 		s.logger.Warn("Generated thread title is empty",
 			zap.String("threadID", threadID.String()))
+
 		return
 	}
 
@@ -385,6 +389,7 @@ func (s *Service) generateAndUpdateThreadTitle(ctx context.Context, threadID dis
 			zap.Error(err),
 			zap.String("threadID", threadID.String()),
 			zap.String("title", title))
+
 		return
 	}
 

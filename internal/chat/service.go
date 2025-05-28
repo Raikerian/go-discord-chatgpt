@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 
@@ -162,7 +163,11 @@ func (s *Service) HandleChatInteraction(ctx context.Context, e *gateway.Interact
 	}
 
 	// Generate thread title asynchronously after successful AI response
-	go s.generateAndUpdateThreadTitle(context.Background(), newThread.ID, messages, &aiResponse.Choices[0].Message)
+	titleCtx, titleCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	go func() {
+		defer titleCancel()
+		s.generateAndUpdateThreadTitle(titleCtx, newThread.ID, messages, &aiResponse.Choices[0].Message)
+	}()
 
 	s.conversationStore.StoreInitialConversation(newThread.ID.String(), userPrompt, aiMessageContent, modelToUse, userDisplayName, botDisplayName, SanitizeOpenAIName)
 

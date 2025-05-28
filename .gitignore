@@ -52,7 +52,6 @@ tasks.json
 tasks/
 # Task Master files
 .roo
-scripts/example_prd.txt
 .env.example
 .roomodes
 .taskmasterconfig

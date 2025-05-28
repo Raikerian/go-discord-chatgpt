@@ -106,8 +106,12 @@ func (b *Bot) Start(ctx context.Context) error {
 		if e.Author.Bot {
 			return
 		}
-		// Create a new context for each message.
-		b.handleMessageCreate(context.Background(), b.Session, e)
+
+		// Create a new context with a timeout for each interaction.
+		ctx, cancel := context.WithTimeout(context.Background(), interactionTimeout)
+		defer cancel()
+
+		b.handleMessageCreate(ctx, b.Session, e)
 	})
 	b.Logger.Info("InteractionCreateEvent and MessageCreateEvent handlers added to session.")
 

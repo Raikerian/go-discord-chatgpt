@@ -18,8 +18,7 @@ This document provides instructions and context for GitHub Copilot to effectivel
 *   **Testify (mock, require, assert)**: For writing unit tests and making assertions.
 *   **Mockery (vektra/mockery)**: For generating mock implementations of interfaces, configured via `.mockery.yml`.
 *   **go-openai (sashabaranov/go-openai)**: Go client library for the OpenAI API.
-*   **go-openai-realtime (WqyJh/go-openai-realtime)**: Go SDK for OpenAI Realtime API enabling real-time voice and text conversations. **Note**: Currently imported as a dependency but voice features are not yet implemented in the codebase.
-*   **layeh.com/gopus**: Opus audio codec library for Go, used for audio processing in voice features. **Note**: Currently imported but not yet utilized in active voice functionality.
+
 *   **golang-lru (hashicorp/golang-lru/v2)**: LRU cache implementation, used for caching OpenAI message history.
 *   **GoReleaser v2**: Professional release management tool for building, packaging, and releasing Go applications with multi-architecture support.
 *   **GitHub Actions**: CI/CD automation platform for testing, building, and deploying the application.
@@ -43,7 +42,6 @@ This document provides instructions and context for GitHub Copilot to effectivel
 ├── .goreleaser.yml         # GoReleaser v2 configuration for releases and builds
 ├── .golangci.yml           # golangci-lint configuration
 ├── .mockery.yml            # Configuration for Mockery mock generation
-├── test-pipeline.sh        # Local pipeline validation script
 ├── .github/
 │   ├── workflows/
 │   │   ├── ci.yml          # CI pipeline for pull requests (testing, validation)
@@ -145,7 +143,6 @@ This document provides instructions and context for GitHub Copilot to effectivel
     *   **Version Management**: Embedded version information using GoReleaser ldflags targeting `internal/commands.AppVersion` for the `/version` command.
     *   **Container Registry**: Images published to GitHub Container Registry (ghcr.io) with proper tagging (semantic versions for releases, commit SHA for snapshots).
     *   **Automated Deployment**: Production deployment to DigitalOcean via [`.github/scripts/deploy.sh`](.github/scripts/deploy.sh) with health checks and rollback capabilities.
-    *   **Pipeline Validation**: Local testing via [`test-pipeline.sh`](test-pipeline.sh) script for validating complete CI/CD setup.
 
 ## Local Development
 
@@ -177,14 +174,13 @@ go run main.go
 *   **Commenting**: Avoid redundant and long comments. Only comment where necessary to explain complex logic or non-obvious decisions.
 *   **Error Handling**: Handle errors explicitly. Fx's lifecycle management will also report errors during startup/shutdown.
 *   **Configuration-Driven**: Make behavior configurable via [`config.yaml`](config.yaml) where appropriate (e.g., guild IDs, OpenAI models, cache size, interaction timeouts).
-*   **Voice Features**: While `go-openai-realtime` and `layeh.com/gopus` are imported as dependencies, voice functionality is not yet implemented. Future voice feature development should use `go doc` to access API documentation for these packages and follow the modular chat service architecture.
+*   **Project Management**: The project includes Taskmaster integration for structured development workflows. Configuration is maintained in `.taskmasterconfig` for AI model settings and task management preferences.
 *   **Go Best Practices**: Adhere to the guidelines outlined in [`golang.instructions.md`](.github/instructions/golang.instructions.md) for consistent and high-quality Go code.
 *   **CI/CD & Deployment**:
     *   Use GoReleaser v2 for professional release management and multi-architecture builds.
     *   Follow the deployment patterns established in the GitHub Actions workflows for consistent and reliable deployments.
     *   Maintain version embedding through GoReleaser ldflags for runtime version reporting.
     *   Ensure Docker images are optimized and secure using Alpine base images with non-root users.
-    *   Use the [`test-pipeline.sh`](test-pipeline.sh) script to validate pipeline setup before pushing changes.
 *   **Testing**:
     *   Write unit tests for individual components and commands, focusing on public interfaces.
     *   Utilize the `testify` suite for assertions.
@@ -269,12 +265,6 @@ The project includes a complete CI/CD pipeline with the following capabilities:
 - Automated GitHub releases with changelogs
 - Multi-architecture Docker images (Linux amd64/arm64)
 - Production deployment with health checks
-
-### Local Validation:
-Use the [`test-pipeline.sh`](test-pipeline.sh) script to validate the complete pipeline setup:
-```bash
-./test-pipeline.sh
-```
 
 This script validates Go dependencies, runs tests, checks GoReleaser configuration, and verifies all required files are present.
 

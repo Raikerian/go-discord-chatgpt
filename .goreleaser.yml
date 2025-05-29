@@ -44,6 +44,7 @@ dockers:
     extra_files:
       - go.mod
       - go.sum
+      - models.json
     goarch: amd64
   # Separate configuration for latest tag on releases only
   - image_templates:
@@ -61,6 +62,7 @@ dockers:
     extra_files:
       - go.mod
       - go.sum
+      - models.json
     goarch: amd64
     skip_push: "{{.IsSnapshot}}"
 

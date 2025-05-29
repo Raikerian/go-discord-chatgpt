@@ -7,10 +7,9 @@ import (
 
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/session"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
-
-	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
 )
 
 const (
@@ -20,7 +19,7 @@ const (
 
 // ConversationStore defines the interface for storing, retrieving, and reconstructing conversation history.
 type ConversationStore interface {
-	GetConversation(threadID string) (data *gpt.MessagesCacheData, found bool)
+	GetConversation(threadID string) (data *MessagesCacheData, found bool)
 	StoreInitialConversation(threadID string, userPrompt, aiResponse, model, userName, botName string, nameSanitizer func(string) string)
 	UpdateConversationWithNewMessages(threadID string, existingMessages []openai.ChatCompletionMessage, newUserMessage, newAssistantMessage *openai.ChatCompletionMessage, modelName string)
 	UpdateConversationMessages(threadID string, messages []openai.ChatCompletionMessage, model string)
@@ -33,7 +32,7 @@ type ConversationStore interface {
 		botDisplayName string,
 		nameSanitizer func(string) string,
 		userDisplayNameResolver func(user *discord.User) string,
-	) (cacheData *gpt.MessagesCacheData, modelName string, err error)
+	) (cacheData *MessagesCacheData, modelName string, err error)
 	AddToNegativeCache(threadID string)
 	IsInNegativeCache(threadID string) bool
 }
@@ -45,27 +44,27 @@ func NewConversationStore(
 	negativeThreadCacheSize int,
 	summaryParser SummaryParser,
 ) ConversationStore {
-	// Create caches directly using the new constructors
-	messagesCache := gpt.NewMessagesCache(messageCacheSize)
-	negativeThreadCache := gpt.NewNegativeThreadCache(negativeThreadCacheSize)
+	// Create caches directly using the constructor functions
+	messagesCache := NewMessagesCache(messageCacheSize)
+	negativeThreadCache := NewNegativeThreadCache(negativeThreadCacheSize)
 
 	return &cacheBasedConversationStore{
 		logger:              logger.Named("conversation_store"),
-		messagesCache:       &messagesCache,
-		negativeThreadCache: &negativeThreadCache,
+		messagesCache:       messagesCache,
+		negativeThreadCache: negativeThreadCache,
 		summaryParser:       summaryParser,
 	}
 }
 
 type cacheBasedConversationStore struct {
 	logger              *zap.Logger
-	messagesCache       *gpt.MessagesCache
-	negativeThreadCache *gpt.NegativeThreadCache
+	messagesCache       *lru.Cache[string, *MessagesCacheData]
+	negativeThreadCache *lru.Cache[string, bool]
 	summaryParser       SummaryParser
 }
 
 // GetConversation retrieves a conversation from the cache.
-func (cs *cacheBasedConversationStore) GetConversation(threadID string) (*gpt.MessagesCacheData, bool) {
+func (cs *cacheBasedConversationStore) GetConversation(threadID string) (*MessagesCacheData, bool) {
 	return cs.messagesCache.Get(threadID)
 }
 
@@ -76,7 +75,7 @@ func (cs *cacheBasedConversationStore) StoreInitialConversation(threadID, userPr
 			{Role: openai.ChatMessageRoleUser, Content: userPrompt, Name: nameSanitizer(userName)},
 			{Role: openai.ChatMessageRoleAssistant, Content: aiResponse, Name: nameSanitizer(botName)},
 		}
-		cacheData := &gpt.MessagesCacheData{
+		cacheData := &MessagesCacheData{
 			Messages: history,
 			Model:    model,
 		}
@@ -88,7 +87,7 @@ func (cs *cacheBasedConversationStore) StoreInitialConversation(threadID, userPr
 // UpdateConversationWithNewMessages updates an existing conversation with new messages.
 func (cs *cacheBasedConversationStore) UpdateConversationWithNewMessages(threadID string, existingMessages []openai.ChatCompletionMessage, newUserMessage, newAssistantMessage *openai.ChatCompletionMessage, modelName string) {
 	updatedMessages := append(existingMessages, *newUserMessage, *newAssistantMessage)
-	cacheData := &gpt.MessagesCacheData{
+	cacheData := &MessagesCacheData{
 		Messages: updatedMessages,
 		Model:    modelName,
 	}
@@ -98,7 +97,7 @@ func (cs *cacheBasedConversationStore) UpdateConversationWithNewMessages(threadI
 
 // UpdateConversationMessages updates conversation with new messages (for immediate user message caching and AI response updates).
 func (cs *cacheBasedConversationStore) UpdateConversationMessages(threadID string, messages []openai.ChatCompletionMessage, model string) {
-	cacheData := &gpt.MessagesCacheData{
+	cacheData := &MessagesCacheData{
 		Messages: messages,
 		Model:    model,
 	}
@@ -116,7 +115,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 	botDisplayName string,
 	nameSanitizer func(string) string,
 	userDisplayNameResolver func(user *discord.User) string,
-) (cacheData *gpt.MessagesCacheData, modelName string, err error) {
+) (cacheData *MessagesCacheData, modelName string, err error) {
 	cs.logger.Info("Attempting to reconstruct conversation history for thread",
 		zap.String("threadID", threadID.String()),
 		zap.String("excludingMessageID", currentMessageIDToExclude.String()),
@@ -232,7 +231,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 	}
 	cs.logger.Debug("Reconstructed message history", zap.Int("count", len(history)), zap.String("threadID", threadID.String()))
 
-	reconstructedCacheData := &gpt.MessagesCacheData{
+	reconstructedCacheData := &MessagesCacheData{
 		Messages: history,
 		Model:    parsedModelName,
 	}
@@ -248,7 +247,7 @@ func (cs *cacheBasedConversationStore) ReconstructAndCache(
 
 // AddToNegativeCache adds a thread to the negative cache.
 func (cs *cacheBasedConversationStore) AddToNegativeCache(threadID string) {
-	cs.negativeThreadCache.Add(threadID)
+	cs.negativeThreadCache.Add(threadID, true)
 	cs.logger.Debug("Added thread to negative cache", zap.String("threadID", threadID))
 }
 

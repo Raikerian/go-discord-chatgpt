@@ -15,7 +15,6 @@ import (
 	"github.com/Raikerian/go-discord-chatgpt/internal/commands"
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/Raikerian/go-discord-chatgpt/internal/discord"
-	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
 	"github.com/Raikerian/go-discord-chatgpt/internal/infrastructure"
 	"github.com/Raikerian/go-discord-chatgpt/internal/openai"
 	pkginfra "github.com/Raikerian/go-discord-chatgpt/pkg/infrastructure"
@@ -38,7 +37,6 @@ func main() {
 		openai.Module,
 
 		// Application modules
-		gpt.Module,
 		chat.Module,
 		commands.Module,
 		bot.Module,

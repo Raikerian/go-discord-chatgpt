@@ -1,0 +1,826 @@
+---
+description: 
+globs: *.go
+alwaysApply: false
+---
+# Go Best Practices
+
+This rule enforces Go best practices based on Google's Go Style Best Practices and Effective Go documentation.
+
+## **Naming Conventions**
+
+### **Function and Method Names**
+- **Avoid repetition** in function names - don't repeat package names, receiver types, or parameter names
+- **Functions that return something** use noun-like names
+- **Functions that do something** use verb-like names
+- **Avoid "Get" prefix** for functions that return values
+- **Include type names** when functions differ only by types
+
+```go
+// ✅ DO: Avoid repetition, use noun-like names for getters
+package user
+
+func (u *User) Name() string { return u.name }
+func (u *User) SetName(name string) { u.name = name }
+func New(name string) *User { return &User{name: name} }
+
+// ❌ DON'T: Repeat package name, use "Get" prefix
+func GetUserName(u *User) string { return u.name }
+func NewUser(name string) *User { return &User{name: name} }
+
+// ✅ DO: Include type names when functions differ by types
+func ParseInt(s string) (int, error) { ... }
+func ParseFloat(s string) (float64, error) { ... }
+
+// ❌ DON'T: Ambiguous function names
+func Parse(s string) (int, error) { ... }
+func Parse(s string) (float64, error) { ... } // Compilation error
+```
+
+### **Variable and Constant Names**
+- **Use short names** for short-lived variables
+- **Use descriptive names** for longer-lived variables
+- **Constants** should be in CamelCase, not SCREAMING_SNAKE_CASE (unless exported and part of a public API)
+
+```go
+// ✅ DO: Short names for short scope
+for i, v := range items {
+    process(v)
+}
+
+// ✅ DO: Descriptive names for longer scope
+func processUserRequests(userRequestQueue chan *UserRequest) {
+    for request := range userRequestQueue {
+        handleUserRequest(request)
+    }
+}
+
+// ✅ DO: CamelCase constants
+const (
+    maxRetries = 3
+    defaultTimeout = 30 * time.Second
+)
+
+// ❌ DON'T: SCREAMING_SNAKE_CASE for internal constants
+const MAX_RETRIES = 3
+```
+
+### **Package Names**
+- **Use short, clear names**
+- **Avoid underscores, mixedCaps, or plurals**
+- **Package name should be part of the API design**
+
+```go
+// ✅ DO: Short, clear package names
+package user
+package http
+package json
+
+// ❌ DON'T: Underscores, mixedCaps, plurals
+package user_service
+package httpUtils
+package users
+```
+
+## **Error Handling**
+
+### **Error Creation and Wrapping**
+- **Use `fmt.Errorf` with `%w` verb** to wrap errors
+- **Create custom error types** for errors that need to be handled differently
+- **Don't ignore errors** - handle them explicitly
+
+```go
+// ✅ DO: Wrap errors with context
+func processFile(filename string) error {
+    file, err := os.Open(filename)
+    if err != nil {
+        return fmt.Errorf("failed to open file %s: %w", filename, err)
+    }
+    defer file.Close()
+    
+    if err := process(file); err != nil {
+        return fmt.Errorf("failed to process file %s: %w", filename, err)
+    }
+    return nil
+}
+
+// ✅ DO: Custom error types for different handling
+type ValidationError struct {
+    Field string
+    Value interface{}
+}
+
+func (e *ValidationError) Error() string {
+    return fmt.Sprintf("validation failed for field %s with value %v", e.Field, e.Value)
+}
+
+// ❌ DON'T: Ignore errors
+file, _ := os.Open(filename) // Don't do this
+```
+
+### **Error Checking Patterns**
+- **Check errors immediately** after the operation
+- **Use early returns** to reduce nesting
+- **Handle errors at the appropriate level**
+
+```go
+// ✅ DO: Early returns, immediate error checking
+func processData(data []byte) (*Result, error) {
+    if len(data) == 0 {
+        return nil, errors.New("data cannot be empty")
+    }
+    
+    parsed, err := parseData(data)
+    if err != nil {
+        return nil, fmt.Errorf("failed to parse data: %w", err)
+    }
+    
+    validated, err := validateData(parsed)
+    if err != nil {
+        return nil, fmt.Errorf("validation failed: %w", err)
+    }
+    
+    return &Result{Data: validated}, nil
+}
+
+// ❌ DON'T: Nested error handling
+func processDataBad(data []byte) (*Result, error) {
+    if len(data) != 0 {
+        parsed, err := parseData(data)
+        if err == nil {
+            validated, err := validateData(parsed)
+            if err == nil {
+                return &Result{Data: validated}, nil
+            } else {
+                return nil, fmt.Errorf("validation failed: %w", err)
+            }
+        } else {
+            return nil, fmt.Errorf("failed to parse data: %w", err)
+        }
+    } else {
+        return nil, errors.New("data cannot be empty")
+    }
+}
+```
+
+## **Interface Design**
+
+### **Interface Definitions**
+- **Keep interfaces small** - prefer many small interfaces over few large ones
+- **Define interfaces at the point of use**, not at the point of implementation
+- **Use standard interface names** when possible (io.Reader, io.Writer, etc.)
+
+```go
+// ✅ DO: Small, focused interfaces
+type Reader interface {
+    Read([]byte) (int, error)
+}
+
+type Writer interface {
+    Write([]byte) (int, error)
+}
+
+// ✅ DO: Define interfaces where they're used
+package storage
+
+type UserRepository interface {
+    GetUser(id string) (*User, error)
+    SaveUser(*User) error
+}
+
+func NewUserService(repo UserRepository) *UserService {
+    return &UserService{repo: repo}
+}
+
+// ❌ DON'T: Large, monolithic interfaces
+type UserManager interface {
+    GetUser(id string) (*User, error)
+    SaveUser(*User) error
+    DeleteUser(id string) error
+    ListUsers() ([]*User, error)
+    ValidateUser(*User) error
+    HashPassword(string) string
+    SendEmail(*User, string) error
+}
+```
+
+### **Interface Satisfaction**
+- **Implement interfaces implicitly**
+- **Use interface{} sparingly** - prefer specific types
+- **Accept interfaces, return concrete types**
+
+```go
+// ✅ DO: Accept interfaces, return concrete types
+func ProcessData(r io.Reader) (*ProcessedData, error) {
+    // Implementation
+    return &ProcessedData{}, nil
+}
+
+// ✅ DO: Implicit interface satisfaction
+type FileProcessor struct{}
+
+func (fp *FileProcessor) Read(p []byte) (int, error) {
+    // Implementation - automatically satisfies io.Reader
+    return 0, nil
+}
+
+// ❌ DON'T: Overuse interface{}
+func ProcessAnything(data interface{}) interface{} {
+    // Avoid this pattern
+    return nil
+}
+```
+
+## **Struct Design and Methods**
+
+### **Struct Organization**
+- **Group related fields together**
+- **Use embedding for composition**
+- **Prefer composition over inheritance**
+
+```go
+// ✅ DO: Logical field grouping
+type User struct {
+    // Identity
+    ID   string
+    Name string
+    
+    // Contact
+    Email string
+    Phone string
+    
+    // Metadata
+    CreatedAt time.Time
+    UpdatedAt time.Time
+}
+
+// ✅ DO: Use embedding for composition
+type TimestampedEntity struct {
+    CreatedAt time.Time
+    UpdatedAt time.Time
+}
+
+type User struct {
+    TimestampedEntity
+    ID    string
+    Name  string
+    Email string
+}
+
+// ❌ DON'T: Random field ordering
+type UserBad struct {
+    Name      string
+    CreatedAt time.Time
+    Email     string
+    ID        string
+    Phone     string
+    UpdatedAt time.Time
+}
+```
+
+### **Method Receivers**
+- **Use pointer receivers** for methods that modify the receiver
+- **Use pointer receivers** for large structs to avoid copying
+- **Be consistent** - if some methods use pointer receivers, all should
+- **Use value receivers** for small, immutable types
+
+```go
+// ✅ DO: Pointer receivers for modification
+func (u *User) SetName(name string) {
+    u.Name = name
+}
+
+// ✅ DO: Pointer receivers for large structs
+func (c *Config) Validate() error {
+    // Even if not modifying, use pointer for large structs
+    return nil
+}
+
+// ✅ DO: Value receivers for small, immutable types
+type Point struct {
+    X, Y int
+}
+
+func (p Point) String() string {
+    return fmt.Sprintf("(%d, %d)", p.X, p.Y)
+}
+
+// ❌ DON'T: Mix receiver types inconsistently
+func (u User) GetName() string { return u.Name }  // Value receiver
+func (u *User) GetEmail() string { return u.Email } // Pointer receiver - inconsistent
+```
+
+## **Concurrency Patterns**
+
+### **Goroutines and Channels**
+- **Use channels to communicate**, don't communicate by sharing memory
+- **Close channels from the sender side**
+- **Use context for cancellation and timeouts**
+- **Avoid goroutine leaks** - ensure goroutines can exit
+
+```go
+// ✅ DO: Use channels for communication
+func processItems(items <-chan Item) <-chan Result {
+    results := make(chan Result)
+    
+    go func() {
+        defer close(results) // Close from sender side
+        for item := range items {
+            result := process(item)
+            results <- result
+        }
+    }()
+    
+    return results
+}
+
+// ✅ DO: Use context for cancellation
+func processWithTimeout(ctx context.Context, data []byte) error {
+    done := make(chan error, 1)
+    
+    go func() {
+        done <- heavyProcessing(data)
+    }()
+    
+    select {
+    case err := <-done:
+        return err
+    case <-ctx.Done():
+        return ctx.Err()
+    }
+}
+
+// ❌ DON'T: Share memory without synchronization
+var counter int // Shared without protection
+
+func increment() {
+    counter++ // Race condition
+}
+```
+
+### **Synchronization**
+- **Use sync.Mutex** for protecting shared state
+- **Use sync.RWMutex** when you have many readers and few writers
+- **Use sync.Once** for one-time initialization
+- **Prefer channels over mutexes** when possible
+
+```go
+// ✅ DO: Protect shared state with mutex
+type Counter struct {
+    mu    sync.Mutex
+    value int
+}
+
+func (c *Counter) Increment() {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    c.value++
+}
+
+func (c *Counter) Value() int {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    return c.value
+}
+
+// ✅ DO: Use sync.Once for initialization
+var (
+    instance *Service
+    once     sync.Once
+)
+
+func GetService() *Service {
+    once.Do(func() {
+        instance = &Service{}
+    })
+    return instance
+}
+```
+
+## **Testing Patterns**
+
+### **Test Organization**
+- **Use table-driven tests** for multiple test cases
+- **Test behavior, not implementation**
+- **Use descriptive test names**
+- **Separate unit tests from integration tests**
+
+```go
+// ✅ DO: Table-driven tests
+func TestParseInt(t *testing.T) {
+    tests := []struct {
+        name    string
+        input   string
+        want    int
+        wantErr bool
+    }{
+        {
+            name:    "valid positive number",
+            input:   "123",
+            want:    123,
+            wantErr: false,
+        },
+        {
+            name:    "valid negative number",
+            input:   "-456",
+            want:    -456,
+            wantErr: false,
+        },
+        {
+            name:    "invalid input",
+            input:   "abc",
+            want:    0,
+            wantErr: true,
+        },
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got, err := ParseInt(tt.input)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("ParseInt() error = %v, wantErr %v", err, tt.wantErr)
+                return
+            }
+            if got != tt.want {
+                t.Errorf("ParseInt() = %v, want %v", got, tt.want)
+            }
+        })
+    }
+}
+
+// ✅ DO: Test behavior, not implementation
+func TestUserService_CreateUser(t *testing.T) {
+    // Test that user is created with correct properties
+    // Don't test internal implementation details
+}
+
+// ❌ DON'T: Test implementation details
+func TestUserService_CreateUser_CallsRepositorySave(t *testing.T) {
+    // Don't test that specific methods are called
+}
+```
+
+### **Test Doubles and Mocks**
+- **Use interfaces for testability**
+- **Create simple test doubles** when possible
+- **Use dependency injection** for better testability
+
+```go
+// ✅ DO: Use interfaces for testability
+type UserRepository interface {
+    Save(*User) error
+    FindByID(string) (*User, error)
+}
+
+type UserService struct {
+    repo UserRepository
+}
+
+// ✅ DO: Simple test double
+type mockUserRepository struct {
+    users map[string]*User
+}
+
+func (m *mockUserRepository) Save(u *User) error {
+    m.users[u.ID] = u
+    return nil
+}
+
+func (m *mockUserRepository) FindByID(id string) (*User, error) {
+    if user, exists := m.users[id]; exists {
+        return user, nil
+    }
+    return nil, errors.New("user not found")
+}
+
+func TestUserService_CreateUser(t *testing.T) {
+    repo := &mockUserRepository{users: make(map[string]*User)}
+    service := &UserService{repo: repo}
+    
+    // Test implementation
+}
+```
+
+## **Package Organization**
+
+### **Package Structure**
+- **Organize by domain**, not by layer
+- **Keep packages focused** on a single responsibility
+- **Use internal packages** for implementation details
+- **Avoid circular dependencies**
+
+```go
+// ✅ DO: Organize by domain
+project/
+├── user/
+│   ├── user.go
+│   ├── repository.go
+│   └── service.go
+├── order/
+│   ├── order.go
+│   ├── repository.go
+│   └── service.go
+└── internal/
+    └── database/
+        └── connection.go
+
+// ❌ DON'T: Organize by layer
+project/
+├── models/
+│   ├── user.go
+│   └── order.go
+├── repositories/
+│   ├── user_repository.go
+│   └── order_repository.go
+└── services/
+    ├── user_service.go
+    └── order_service.go
+```
+
+### **Import Organization**
+- **Group imports** into standard library, third-party, and local
+- **Use blank imports** only when necessary
+- **Avoid dot imports** except in tests
+
+```go
+// ✅ DO: Organized imports
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+    
+    "github.com/gorilla/mux"
+    "go.uber.org/zap"
+    
+    "github.com/yourorg/yourproject/internal/user"
+    "github.com/yourorg/yourproject/internal/config"
+)
+
+// ❌ DON'T: Unorganized imports
+import (
+    "github.com/yourorg/yourproject/internal/user"
+    "fmt"
+    "github.com/gorilla/mux"
+    "time"
+    "github.com/yourorg/yourproject/internal/config"
+    "context"
+    "go.uber.org/zap"
+)
+```
+
+## **Performance and Memory**
+
+### **Memory Management**
+- **Reuse slices and maps** when possible
+- **Use sync.Pool** for frequently allocated objects
+- **Be mindful of slice capacity** vs length
+- **Avoid memory leaks** in long-running applications
+
+```go
+// ✅ DO: Reuse slices
+func processItems(items []Item) []Result {
+    results := make([]Result, 0, len(items)) // Pre-allocate capacity
+    for _, item := range items {
+        results = append(results, process(item))
+    }
+    return results
+}
+
+// ✅ DO: Use sync.Pool for frequent allocations
+var bufferPool = sync.Pool{
+    New: func() interface{} {
+        return make([]byte, 0, 1024)
+    },
+}
+
+func processData(data []byte) []byte {
+    buf := bufferPool.Get().([]byte)
+    defer bufferPool.Put(buf[:0]) // Reset length, keep capacity
+    
+    // Use buf for processing
+    return append(buf, processedData...)
+}
+
+// ❌ DON'T: Unnecessary allocations
+func processItemsBad(items []Item) []Result {
+    var results []Result // Will grow and reallocate multiple times
+    for _, item := range items {
+        results = append(results, process(item))
+    }
+    return results
+}
+```
+
+### **String Operations**
+- **Use strings.Builder** for concatenating multiple strings
+- **Use fmt.Sprintf** for formatted strings
+- **Avoid string concatenation** in loops
+
+```go
+// ✅ DO: Use strings.Builder for concatenation
+func buildMessage(parts []string) string {
+    var builder strings.Builder
+    for _, part := range parts {
+        builder.WriteString(part)
+        builder.WriteString(" ")
+    }
+    return builder.String()
+}
+
+// ✅ DO: Use fmt.Sprintf for formatting
+func formatUser(u *User) string {
+    return fmt.Sprintf("User{ID: %s, Name: %s}", u.ID, u.Name)
+}
+
+// ❌ DON'T: String concatenation in loops
+func buildMessageBad(parts []string) string {
+    var message string
+    for _, part := range parts {
+        message += part + " " // Creates new string each iteration
+    }
+    return message
+}
+```
+
+## **Global State and Singletons**
+
+### **Avoiding Global State**
+- **Avoid global variables** - use dependency injection instead
+- **Don't use init() functions** for complex initialization
+- **Prefer explicit dependencies** over implicit global state
+
+```go
+// ✅ DO: Dependency injection
+type Service struct {
+    logger *zap.Logger
+    config *Config
+}
+
+func NewService(logger *zap.Logger, config *Config) *Service {
+    return &Service{
+        logger: logger,
+        config: config,
+    }
+}
+
+// ✅ DO: Pass dependencies explicitly
+func ProcessRequest(ctx context.Context, req *Request, logger *zap.Logger) error {
+    logger.Info("Processing request", zap.String("id", req.ID))
+    // Process request
+    return nil
+}
+
+// ❌ DON'T: Global state
+var (
+    globalLogger *zap.Logger
+    globalConfig *Config
+)
+
+func ProcessRequestBad(ctx context.Context, req *Request) error {
+    globalLogger.Info("Processing request") // Hidden dependency
+    // Process request
+    return nil
+}
+
+// ❌ DON'T: Complex init() functions
+func init() {
+    // Don't do complex initialization here
+    globalLogger = setupComplexLogger()
+    globalConfig = loadComplexConfig()
+}
+```
+
+### **Singleton Pattern**
+- **Avoid singletons** when possible
+- **Use sync.Once** if singleton is necessary
+- **Consider dependency injection** as an alternative
+
+```go
+// ✅ DO: Dependency injection instead of singleton
+type DatabaseConfig struct {
+    Host     string
+    Port     int
+    Database string
+}
+
+func NewDatabaseConnection(config *DatabaseConfig) (*sql.DB, error) {
+    // Create connection
+    return sql.Open("postgres", config.ConnectionString())
+}
+
+// ✅ DO: If singleton is necessary, use sync.Once
+type Logger struct {
+    *zap.Logger
+}
+
+var (
+    loggerInstance *Logger
+    loggerOnce     sync.Once
+)
+
+func GetLogger() *Logger {
+    loggerOnce.Do(func() {
+        zapLogger, _ := zap.NewProduction()
+        loggerInstance = &Logger{zapLogger}
+    })
+    return loggerInstance
+}
+
+// ❌ DON'T: Unsafe singleton
+var loggerInstanceBad *Logger
+
+func GetLoggerBad() *Logger {
+    if loggerInstanceBad == nil { // Race condition
+        zapLogger, _ := zap.NewProduction()
+        loggerInstanceBad = &Logger{zapLogger}
+    }
+    return loggerInstanceBad
+}
+```
+
+## **Code Organization and Style**
+
+### **Function Design**
+- **Keep functions small** and focused on a single task
+- **Use early returns** to reduce nesting
+- **Limit function parameters** - consider using structs for many parameters
+- **Return errors as the last value**
+
+```go
+// ✅ DO: Small, focused functions with early returns
+func validateUser(u *User) error {
+    if u == nil {
+        return errors.New("user cannot be nil")
+    }
+    
+    if u.Name == "" {
+        return errors.New("user name is required")
+    }
+    
+    if u.Email == "" {
+        return errors.New("user email is required")
+    }
+    
+    return nil
+}
+
+// ✅ DO: Use structs for many parameters
+type CreateUserRequest struct {
+    Name     string
+    Email    string
+    Password string
+    Role     string
+}
+
+func CreateUser(req *CreateUserRequest) (*User, error) {
+    // Implementation
+    return nil, nil
+}
+
+// ❌ DON'T: Too many parameters
+func CreateUserBad(name, email, password, role, department, manager string, isActive bool, permissions []string) (*User, error) {
+    // Too many parameters
+    return nil, nil
+}
+```
+
+### **Comments and Documentation**
+- **Write package comments** for every package
+- **Document exported functions** and types
+- **Use complete sentences** in comments
+- **Explain why, not what**
+
+```go
+// ✅ DO: Package comment
+// Package user provides functionality for managing user accounts,
+// including creation, authentication, and profile management.
+package user
+
+// ✅ DO: Document exported functions
+// CreateUser creates a new user account with the provided information.
+// It validates the input, hashes the password, and stores the user in the database.
+// Returns the created user or an error if validation fails.
+func CreateUser(req *CreateUserRequest) (*User, error) {
+    // Implementation
+    return nil, nil
+}
+
+// ✅ DO: Explain why, not what
+// We use a separate goroutine here to avoid blocking the main thread
+// while waiting for the slow external API call.
+go func() {
+    result := callSlowAPI()
+    resultChan <- result
+}()
+
+// ❌ DON'T: State the obvious
+// This function adds two numbers
+func Add(a, b int) int {
+    return a + b // Add a and b
+}
+```
+
+This rule covers the essential Go best practices from Google's style guide and Effective Go documentation, focusing on practical patterns that improve code quality, maintainability, and performance.
+

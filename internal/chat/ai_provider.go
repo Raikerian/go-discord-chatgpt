@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
+	pkgopenai "github.com/Raikerian/go-discord-chatgpt/pkg/openai"
 )
 
 // AIProvider defines the interface for interacting with an AI chat completion service.
@@ -17,18 +18,20 @@ type AIProvider interface {
 }
 
 // NewOpenAIProvider creates a new OpenAI-based AIProvider implementation.
-func NewOpenAIProvider(logger *zap.Logger, cfg *config.Config, client *openai.Client) AIProvider {
+func NewOpenAIProvider(logger *zap.Logger, cfg *config.Config, client *openai.Client, pricingService pkgopenai.PricingService) AIProvider {
 	return &openAIProvider{
-		logger: logger.Named("openai_provider"),
-		cfg:    cfg,
-		client: client,
+		logger:         logger.Named("openai_provider"),
+		cfg:            cfg,
+		client:         client,
+		pricingService: pricingService,
 	}
 }
 
 type openAIProvider struct {
-	logger *zap.Logger
-	client *openai.Client
-	cfg    *config.Config
+	logger         *zap.Logger
+	client         *openai.Client
+	cfg            *config.Config
+	pricingService pkgopenai.PricingService
 }
 
 // GetChatCompletion sends a chat completion request to OpenAI and returns the response.
@@ -56,11 +59,26 @@ func (oai *openAIProvider) GetChatCompletion(ctx context.Context, model string, 
 		return nil, errors.New("OpenAI returned empty response")
 	}
 
-	oai.logger.Info("Received response from OpenAI",
+	// Calculate and log cost information
+	cost, costErr := oai.pricingService.CalculateTokenCost(
+		model,
+		aiResponse.Usage.PromptTokens,
+		aiResponse.Usage.CompletionTokens,
+	)
+
+	logFields := []zap.Field{
 		zap.Int("promptTokens", aiResponse.Usage.PromptTokens),
 		zap.Int("completionTokens", aiResponse.Usage.CompletionTokens),
 		zap.Int("totalTokens", aiResponse.Usage.TotalTokens),
-	)
+	}
+
+	if costErr == nil {
+		logFields = append(logFields, zap.Float64("estimatedCostUSD", cost))
+	} else {
+		logFields = append(logFields, zap.String("costCalculationError", costErr.Error()))
+	}
+
+	oai.logger.Info("Received response from OpenAI", logFields...)
 
 	return &aiResponse, nil
 }

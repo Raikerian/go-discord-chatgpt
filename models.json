@@ -1,0 +1,407 @@
+{
+  "last_updated": "2025-01-15T00:00:00Z",
+  "currency": "USD",
+  "note": "Prices are per 1 million tokens. Cached inputs reduce input costs. Some models don't support cached inputs (marked as null).",
+  "models": {
+    "gpt-4.1": {
+      "name": "gpt-4.1",
+      "display_name": "GPT-4.1",
+      "pricing": {
+        "input_per_million": 2.00,
+        "cached_per_million": 0.50,
+        "output_per_million": 8.00
+      },
+      "context_size": 1047576
+    },
+    "gpt-4.1-2025-04-14": {
+      "name": "gpt-4.1-2025-04-14",
+      "display_name": "GPT-4.1 (2025-04-14)",
+      "pricing": {
+        "input_per_million": 2.00,
+        "cached_per_million": 0.50,
+        "output_per_million": 8.00
+      },
+      "context_size": 1047576
+    },
+    "gpt-4.1-mini": {
+      "name": "gpt-4.1-mini",
+      "display_name": "GPT-4.1 Mini",
+      "pricing": {
+        "input_per_million": 0.40,
+        "cached_per_million": 0.10,
+        "output_per_million": 1.60
+      },
+      "context_size": 1047576
+    },
+    "gpt-4.1-mini-2025-04-14": {
+      "name": "gpt-4.1-mini-2025-04-14",
+      "display_name": "GPT-4.1 Mini (2025-04-14)",
+      "pricing": {
+        "input_per_million": 0.40,
+        "cached_per_million": 0.10,
+        "output_per_million": 1.60
+      },
+      "context_size": 1047576
+    },
+    "gpt-4.1-nano": {
+      "name": "gpt-4.1-nano",
+      "display_name": "GPT-4.1 Nano",
+      "pricing": {
+        "input_per_million": 0.10,
+        "cached_per_million": 0.025,
+        "output_per_million": 0.40
+      },
+      "context_size": 1047576
+    },
+    "gpt-4.1-nano-2025-04-14": {
+      "name": "gpt-4.1-nano-2025-04-14",
+      "display_name": "GPT-4.1 Nano (2025-04-14)",
+      "pricing": {
+        "input_per_million": 0.10,
+        "cached_per_million": 0.025,
+        "output_per_million": 0.40
+      },
+      "context_size": 1047576
+    },
+    "gpt-4.5-preview": {
+      "name": "gpt-4.5-preview",
+      "display_name": "GPT-4.5 Preview",
+      "pricing": {
+        "input_per_million": 75.00,
+        "cached_per_million": 37.50,
+        "output_per_million": 150.00
+      },
+      "context_size": 128000
+    },
+    "gpt-4.5-preview-2025-02-27": {
+      "name": "gpt-4.5-preview-2025-02-27",
+      "display_name": "GPT-4.5 Preview (2025-02-27)",
+      "pricing": {
+        "input_per_million": 75.00,
+        "cached_per_million": 37.50,
+        "output_per_million": 150.00
+      },
+      "context_size": 128000
+    },
+    "gpt-4o": {
+      "name": "gpt-4o",
+      "display_name": "GPT-4o",
+      "pricing": {
+        "input_per_million": 2.50,
+        "cached_per_million": 1.25,
+        "output_per_million": 10.00
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-2024-08-06": {
+      "name": "gpt-4o-2024-08-06",
+      "display_name": "GPT-4o (2024-08-06)",
+      "pricing": {
+        "input_per_million": 2.50,
+        "cached_per_million": 1.25,
+        "output_per_million": 10.00
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-audio-preview": {
+      "name": "gpt-4o-audio-preview",
+      "display_name": "GPT-4o Audio Preview",
+      "pricing": {
+        "input_per_million": 2.50,
+        "cached_per_million": null,
+        "output_per_million": 10.00
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-audio-preview-2024-12-17": {
+      "name": "gpt-4o-audio-preview-2024-12-17",
+      "display_name": "GPT-4o Audio Preview (2024-12-17)",
+      "pricing": {
+        "input_per_million": 2.50,
+        "cached_per_million": null,
+        "output_per_million": 10.00
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-realtime-preview": {
+      "name": "gpt-4o-realtime-preview",
+      "display_name": "GPT-4o Realtime Preview",
+      "pricing": {
+        "input_per_million": 5.00,
+        "cached_per_million": 2.50,
+        "output_per_million": 20.00
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-realtime-preview-2024-12-17": {
+      "name": "gpt-4o-realtime-preview-2024-12-17",
+      "display_name": "GPT-4o Realtime Preview (2024-12-17)",
+      "pricing": {
+        "input_per_million": 5.00,
+        "cached_per_million": 2.50,
+        "output_per_million": 20.00
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-mini": {
+      "name": "gpt-4o-mini",
+      "display_name": "GPT-4o Mini",
+      "pricing": {
+        "input_per_million": 0.15,
+        "cached_per_million": 0.075,
+        "output_per_million": 0.60
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-mini-2024-07-18": {
+      "name": "gpt-4o-mini-2024-07-18",
+      "display_name": "GPT-4o Mini (2024-07-18)",
+      "pricing": {
+        "input_per_million": 0.15,
+        "cached_per_million": 0.075,
+        "output_per_million": 0.60
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-mini-audio-preview": {
+      "name": "gpt-4o-mini-audio-preview",
+      "display_name": "GPT-4o Mini Audio Preview",
+      "pricing": {
+        "input_per_million": 0.15,
+        "cached_per_million": null,
+        "output_per_million": 0.60
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-mini-audio-preview-2024-12-17": {
+      "name": "gpt-4o-mini-audio-preview-2024-12-17",
+      "display_name": "GPT-4o Mini Audio Preview (2024-12-17)",
+      "pricing": {
+        "input_per_million": 0.15,
+        "cached_per_million": null,
+        "output_per_million": 0.60
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-mini-realtime-preview": {
+      "name": "gpt-4o-mini-realtime-preview",
+      "display_name": "GPT-4o Mini Realtime Preview",
+      "pricing": {
+        "input_per_million": 0.60,
+        "cached_per_million": 0.30,
+        "output_per_million": 2.40
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-mini-realtime-preview-2024-12-17": {
+      "name": "gpt-4o-mini-realtime-preview-2024-12-17",
+      "display_name": "GPT-4o Mini Realtime Preview (2024-12-17)",
+      "pricing": {
+        "input_per_million": 0.60,
+        "cached_per_million": 0.30,
+        "output_per_million": 2.40
+      },
+      "context_size": 128000
+    },
+    "o1": {
+      "name": "o1",
+      "display_name": "o1",
+      "pricing": {
+        "input_per_million": 15.00,
+        "cached_per_million": 7.50,
+        "output_per_million": 60.00
+      },
+      "context_size": 200000
+    },
+    "o1-2024-12-17": {
+      "name": "o1-2024-12-17",
+      "display_name": "o1 (2024-12-17)",
+      "pricing": {
+        "input_per_million": 15.00,
+        "cached_per_million": 7.50,
+        "output_per_million": 60.00
+      },
+      "context_size": 200000
+    },
+    "o1-pro": {
+      "name": "o1-pro",
+      "display_name": "o1-pro",
+      "pricing": {
+        "input_per_million": 150.00,
+        "cached_per_million": null,
+        "output_per_million": 600.00
+      },
+      "context_size": 200000
+    },
+    "o1-pro-2025-03-19": {
+      "name": "o1-pro-2025-03-19",
+      "display_name": "o1-pro (2025-03-19)",
+      "pricing": {
+        "input_per_million": 150.00,
+        "cached_per_million": null,
+        "output_per_million": 600.00
+      },
+      "context_size": 200000
+    },
+    "o3": {
+      "name": "o3",
+      "display_name": "o3",
+      "pricing": {
+        "input_per_million": 10.00,
+        "cached_per_million": 2.50,
+        "output_per_million": 40.00
+      },
+      "context_size": 200000
+    },
+    "o3-2025-04-16": {
+      "name": "o3-2025-04-16",
+      "display_name": "o3 (2025-04-16)",
+      "pricing": {
+        "input_per_million": 10.00,
+        "cached_per_million": 2.50,
+        "output_per_million": 40.00
+      },
+      "context_size": 200000
+    },
+    "o4-mini": {
+      "name": "o4-mini",
+      "display_name": "o4-mini",
+      "pricing": {
+        "input_per_million": 1.10,
+        "cached_per_million": 0.275,
+        "output_per_million": 4.40
+      },
+      "context_size": 200000
+    },
+    "o4-mini-2025-04-16": {
+      "name": "o4-mini-2025-04-16",
+      "display_name": "o4-mini (2025-04-16)",
+      "pricing": {
+        "input_per_million": 1.10,
+        "cached_per_million": 0.275,
+        "output_per_million": 4.40
+      },
+      "context_size": 200000
+    },
+    "o3-mini": {
+      "name": "o3-mini",
+      "display_name": "o3-mini",
+      "pricing": {
+        "input_per_million": 1.10,
+        "cached_per_million": 0.55,
+        "output_per_million": 4.40
+      },
+      "context_size": 200000
+    },
+    "o3-mini-2025-01-31": {
+      "name": "o3-mini-2025-01-31",
+      "display_name": "o3-mini (2025-01-31)",
+      "pricing": {
+        "input_per_million": 1.10,
+        "cached_per_million": 0.55,
+        "output_per_million": 4.40
+      },
+      "context_size": 200000
+    },
+    "o1-mini": {
+      "name": "o1-mini",
+      "display_name": "o1-mini",
+      "pricing": {
+        "input_per_million": 1.10,
+        "cached_per_million": 0.55,
+        "output_per_million": 4.40
+      },
+      "context_size": 128000
+    },
+    "o1-mini-2024-09-12": {
+      "name": "o1-mini-2024-09-12",
+      "display_name": "o1-mini (2024-09-12)",
+      "pricing": {
+        "input_per_million": 1.10,
+        "cached_per_million": 0.55,
+        "output_per_million": 4.40
+      },
+      "context_size": 128000
+    },
+    "codex-mini-latest": {
+      "name": "codex-mini-latest",
+      "display_name": "Codex Mini Latest",
+      "pricing": {
+        "input_per_million": 1.50,
+        "cached_per_million": 0.375,
+        "output_per_million": 6.00
+      },
+      "context_size": 200000
+    },
+    "gpt-4o-mini-search-preview": {
+      "name": "gpt-4o-mini-search-preview",
+      "display_name": "GPT-4o Mini Search Preview",
+      "pricing": {
+        "input_per_million": 0.15,
+        "cached_per_million": null,
+        "output_per_million": 0.60
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-mini-search-preview-2025-03-11": {
+      "name": "gpt-4o-mini-search-preview-2025-03-11",
+      "display_name": "GPT-4o Mini Search Preview (2025-03-11)",
+      "pricing": {
+        "input_per_million": 0.15,
+        "cached_per_million": null,
+        "output_per_million": 0.60
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-search-preview": {
+      "name": "gpt-4o-search-preview",
+      "display_name": "GPT-4o Search Preview",
+      "pricing": {
+        "input_per_million": 2.50,
+        "cached_per_million": null,
+        "output_per_million": 10.00
+      },
+      "context_size": 128000
+    },
+    "gpt-4o-search-preview-2025-03-11": {
+      "name": "gpt-4o-search-preview-2025-03-11",
+      "display_name": "GPT-4o Search Preview (2025-03-11)",
+      "pricing": {
+        "input_per_million": 2.50,
+        "cached_per_million": null,
+        "output_per_million": 10.00
+      },
+      "context_size": 128000
+    },
+    "computer-use-preview": {
+      "name": "computer-use-preview",
+      "display_name": "Computer Use Preview",
+      "pricing": {
+        "input_per_million": 3.00,
+        "cached_per_million": null,
+        "output_per_million": 12.00
+      },
+      "context_size": 8192
+    },
+    "computer-use-preview-2025-03-11": {
+      "name": "computer-use-preview-2025-03-11",
+      "display_name": "Computer Use Preview (2025-03-11)",
+      "pricing": {
+        "input_per_million": 3.00,
+        "cached_per_million": null,
+        "output_per_million": 12.00
+      },
+      "context_size": 8192
+    },
+    "gpt-image-1": {
+      "name": "gpt-image-1",
+      "display_name": "GPT Image 1",
+      "pricing": {
+        "input_per_million": 5.00,
+        "cached_per_million": 1.25,
+        "output_per_million": null
+      },
+      "context_size": null
+    }
+  }
+}

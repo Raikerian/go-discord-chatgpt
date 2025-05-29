@@ -18,6 +18,7 @@ import (
 	"github.com/Raikerian/go-discord-chatgpt/internal/gpt"
 	"github.com/Raikerian/go-discord-chatgpt/internal/infrastructure"
 	"github.com/Raikerian/go-discord-chatgpt/internal/openai"
+	pkginfra "github.com/Raikerian/go-discord-chatgpt/pkg/infrastructure"
 
 	"go.uber.org/fx"
 )
@@ -46,7 +47,7 @@ func main() {
 		fx.Supply(configPath),
 
 		// Configure Fx to use our Zap logger for its own internal logging
-		fx.WithLogger(infrastructure.NewFxLoggerAdapter),
+		fx.WithLogger(pkginfra.NewFxLoggerAdapter),
 	)
 
 	// Set up a channel to listen for OS signals (like Ctrl+C)

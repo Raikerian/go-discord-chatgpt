@@ -25,7 +25,8 @@ type DiscordInteractionManager interface {
 	// StartTypingIndicator sends typing indicators periodically until the returned stop function is called.
 	StartTypingIndicator(ses *session.Session, channelID discord.ChannelID) (stopFunc func())
 	// SendMessage sends a message to a channel, handling long messages by splitting them.
-	SendMessage(ses *session.Session, channelID discord.ChannelID, content string) error
+	// Returns the ID of the last message sent (important for multi-part messages).
+	SendMessage(ses *session.Session, channelID discord.ChannelID, content string) (*discord.Message, error)
 }
 
 // NewDiscordInteractionManager creates a new instance of DiscordInteractionManager.
@@ -134,6 +135,6 @@ func (dim *discordInteractionManagerImpl) StartTypingIndicator(ses *session.Sess
 }
 
 // SendMessage sends a message to a channel, handling long messages by splitting them.
-func (dim *discordInteractionManagerImpl) SendMessage(ses *session.Session, channelID discord.ChannelID, content string) error {
+func (dim *discordInteractionManagerImpl) SendMessage(ses *session.Session, channelID discord.ChannelID, content string) (*discord.Message, error) {
 	return SendLongMessage(ses, channelID, content)
 }

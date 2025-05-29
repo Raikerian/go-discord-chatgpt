@@ -5,7 +5,10 @@ import (
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 
+	"github.com/diamondburned/arikawa/v3/session"
+
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
+	pkgopenai "github.com/Raikerian/go-discord-chatgpt/pkg/openai"
 )
 
 // Module provides chat service dependencies.
@@ -17,6 +20,8 @@ var Module = fx.Module("chat",
 		NewModelSelector,
 		NewSummaryParser,
 		NewOpenAITitleGenerator,
+		NewUsageFormatterProvider,
+		NewMessageEmbedServiceProvider,
 		NewService,
 	),
 )
@@ -42,4 +47,18 @@ func NewConversationStoreProvider(
 	}
 
 	return NewConversationStore(logger, messageCacheSize, negativeThreadCacheSize, summaryParser)
+}
+
+// NewUsageFormatterProvider creates a UsageFormatter with the pricing service.
+func NewUsageFormatterProvider(pricingService pkgopenai.PricingService) UsageFormatter {
+	return NewOpenAIUsageFormatter(pricingService)
+}
+
+// NewMessageEmbedServiceProvider creates a MessageEmbedService with required dependencies.
+func NewMessageEmbedServiceProvider(
+	ses *session.Session,
+	usageFormatter UsageFormatter,
+	logger *zap.Logger,
+) MessageEmbedService {
+	return NewDiscordEmbedService(ses, usageFormatter, logger)
 }

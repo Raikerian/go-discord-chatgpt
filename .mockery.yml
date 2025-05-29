@@ -14,3 +14,7 @@ packages:
   github.com/Raikerian/go-discord-chatgpt/internal/commands:
     config:
       all: true
+  github.com/Raikerian/go-discord-chatgpt/pkg/openai:
+    config:
+      all: true
+

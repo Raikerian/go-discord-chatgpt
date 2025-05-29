@@ -30,11 +30,12 @@ type Service struct {
 	cfg    *config.Config
 	ses    *session.Session
 
-	interactionManager DiscordInteractionManager
-	aiProvider         AIProvider
-	conversationStore  ConversationStore
-	modelSelector      ModelSelector
-	titleGenerator     ThreadTitleGenerator
+	interactionManager  DiscordInteractionManager
+	aiProvider          AIProvider
+	conversationStore   ConversationStore
+	modelSelector       ModelSelector
+	titleGenerator      ThreadTitleGenerator
+	messageEmbedService MessageEmbedService
 
 	// ongoingRequests stores cancel functions for ongoing OpenAI requests per thread.
 	// key: discord.ChannelID, value: context.CancelFunc
@@ -55,16 +56,18 @@ func NewService(
 	conversationStore ConversationStore,
 	modelSelector ModelSelector,
 	titleGenerator ThreadTitleGenerator,
+	messageEmbedService MessageEmbedService,
 ) *Service {
 	return &Service{
-		logger:             logger.Named("chat_service_orchestrator"),
-		cfg:                cfg,
-		ses:                ses,
-		interactionManager: interactionManager,
-		aiProvider:         aiProvider,
-		conversationStore:  conversationStore,
-		modelSelector:      modelSelector,
-		titleGenerator:     titleGenerator,
+		logger:              logger.Named("chat_service_orchestrator"),
+		cfg:                 cfg,
+		ses:                 ses,
+		interactionManager:  interactionManager,
+		aiProvider:          aiProvider,
+		conversationStore:   conversationStore,
+		modelSelector:       modelSelector,
+		titleGenerator:      titleGenerator,
+		messageEmbedService: messageEmbedService,
 	}
 }
 
@@ -147,7 +150,7 @@ func (s *Service) HandleChatInteraction(ctx context.Context, e *gateway.Interact
 	aiResponse, err := s.aiProvider.GetChatCompletion(ctx, modelToUse, messages)
 	if err != nil {
 		errMsgToThread := "Sorry, I encountered an error trying to reach the AI. Please try again later."
-		if sendErr := s.interactionManager.SendMessage(s.ses, newThread.ID, errMsgToThread); sendErr != nil {
+		if _, sendErr := s.interactionManager.SendMessage(s.ses, newThread.ID, errMsgToThread); sendErr != nil {
 			s.logger.Error("Failed to send error message to thread after OpenAI failure", zap.Error(sendErr), zap.String("threadID", newThread.ID.String()))
 		}
 
@@ -156,10 +159,18 @@ func (s *Service) HandleChatInteraction(ctx context.Context, e *gateway.Interact
 
 	aiMessageContent := aiResponse.Choices[0].Message.Content
 
-	if err := s.interactionManager.SendMessage(s.ses, newThread.ID, aiMessageContent); err != nil {
+	// Send AI response and capture the last message
+	lastMessage, err := s.interactionManager.SendMessage(s.ses, newThread.ID, aiMessageContent)
+	if err != nil {
 		s.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", newThread.ID.String()))
 
 		return fmt.Errorf("failed to send AI response to Discord: %w", err)
+	}
+
+	// Add usage footer to the last message sent
+	if embedErr := s.messageEmbedService.AddUsageFooter(ctx, lastMessage, aiResponse.Usage, modelToUse); embedErr != nil {
+		// Log but don't fail the entire operation
+		s.logger.Warn("Failed to add usage footer", zap.Error(embedErr))
 	}
 
 	// Generate thread title asynchronously after successful AI response
@@ -299,7 +310,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		s.logger.Error("OpenAI completion failed for thread message", zap.Error(err))
 		// Send error to Discord but preserve user message in cache
 		errMsg := "Sorry, I encountered an error. Please try again."
-		if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, errMsg); sendErr != nil {
+		if _, sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, errMsg); sendErr != nil {
 			s.logger.Error("Failed to send error message", zap.Error(sendErr))
 		}
 
@@ -310,7 +321,7 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 	if len(aiResponse.Choices) == 0 || aiResponse.Choices[0].Message.Content == "" {
 		s.logger.Error("OpenAI returned no choices or empty message content", zap.String("threadID", threadIDStr))
 		errMsgToThread := "Sorry, I received an empty response from the AI. Please try again."
-		if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, errMsgToThread); sendErr != nil {
+		if _, sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, errMsgToThread); sendErr != nil {
 			s.logger.Error("Failed to send error message to thread for empty AI response", zap.Error(sendErr), zap.String("threadID", threadIDStr))
 		}
 
@@ -324,11 +335,18 @@ func (s *Service) HandleThreadMessage(ctx context.Context, evt *gateway.MessageC
 		zap.Int("completionTokens", aiResponse.Usage.CompletionTokens),
 	)
 
-	// Send response to Discord
-	if sendErr := s.interactionManager.SendMessage(s.ses, evt.ChannelID, aiMessageContent); sendErr != nil {
-		s.logger.Error("Failed to send AI response to thread", zap.Error(sendErr), zap.String("threadID", threadIDStr))
+	// Send response to Discord and capture the last message
+	lastMessage, err := s.interactionManager.SendMessage(s.ses, evt.ChannelID, aiMessageContent)
+	if err != nil {
+		s.logger.Error("Failed to send AI response to thread", zap.Error(err), zap.String("threadID", threadIDStr))
 
-		return fmt.Errorf("failed to send AI response to Discord: %w", sendErr)
+		return fmt.Errorf("failed to send AI response to Discord: %w", err)
+	}
+
+	// Add usage footer to the last message sent
+	if embedErr := s.messageEmbedService.AddUsageFooter(requestCtx, lastMessage, aiResponse.Usage, modelToUse); embedErr != nil {
+		// Log but don't fail the entire operation
+		s.logger.Warn("Failed to add usage footer", zap.Error(embedErr))
 	}
 
 	// 7. Add AI response to cache (with validation)

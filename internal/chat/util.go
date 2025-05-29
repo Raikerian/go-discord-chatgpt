@@ -103,12 +103,10 @@ func MakeThreadName(username, prompt string, maxLength int) string {
 }
 
 // SendLongMessage sends a message to a Discord channel, splitting it into multiple messages
-// if it exceeds discordMaxMessageLength.
-func SendLongMessage(s *session.Session, channelID discord.ChannelID, content string) error {
+// if it exceeds discordMaxMessageLength. Returns the last message sent.
+func SendLongMessage(s *session.Session, channelID discord.ChannelID, content string) (*discord.Message, error) {
 	if len(content) <= discordMaxMessageLength {
-		_, err := s.SendMessageComplex(channelID, api.SendMessageData{Content: content})
-
-		return err
+		return s.SendMessageComplex(channelID, api.SendMessageData{Content: content})
 	}
 
 	var parts []string
@@ -139,15 +137,17 @@ func SendLongMessage(s *session.Session, channelID discord.ChannelID, content st
 		remainingContent = strings.TrimSpace(remainingContent[splitAt:])
 	}
 
+	var lastMessage *discord.Message
 	for i, part := range parts {
 		if strings.TrimSpace(part) == "" { // Avoid sending empty messages
 			continue
 		}
-		_, err := s.SendMessageComplex(channelID, api.SendMessageData{Content: part})
+		msg, err := s.SendMessageComplex(channelID, api.SendMessageData{Content: part})
 		if err != nil {
-			return fmt.Errorf("failed to send message part %d/%d: %w", i+1, len(parts), err)
+			return nil, fmt.Errorf("failed to send message part %d/%d: %w", i+1, len(parts), err)
 		}
+		lastMessage = msg // Keep track of the last message sent
 	}
 
-	return nil
+	return lastMessage, nil
 }

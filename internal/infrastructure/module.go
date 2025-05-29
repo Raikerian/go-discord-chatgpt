@@ -154,6 +154,6 @@ func (p *FxLoggerAdapter) logLoggerInitialized(constructorName string, err error
 }
 
 // Printf implements fx.Printer.
-func (p *FxLoggerAdapter) Printf(format string, args ...interface{}) {
+func (p *FxLoggerAdapter) Printf(format string, args ...any) {
 	p.logger.Infof(format, args...)
 }

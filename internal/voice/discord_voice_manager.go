@@ -254,17 +254,3 @@ func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID disc
 	return audioChannel, nil
 }
 
-// IsConnected checks if connected to a voice channel.
-func (m *discordVoiceManager) IsConnected(channelID discord.ChannelID) bool {
-	_, exists := m.activeConnections[channelID]
-	return exists
-}
-
-// GetActiveConnections returns all active voice connections.
-func (m *discordVoiceManager) GetActiveConnections() map[discord.ChannelID]*VoiceConnection {
-	connections := make(map[discord.ChannelID]*VoiceConnection)
-	for channelID, conn := range m.activeConnections {
-		connections[channelID] = conn
-	}
-	return connections
-}

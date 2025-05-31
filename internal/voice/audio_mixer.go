@@ -361,24 +361,3 @@ func (m *audioMixer) calculateEnergyLevel(audio []byte) float32 {
 	return float32(rms)
 }
 
-// GetMixerStats returns performance statistics
-func (m *audioMixer) GetMixerStats() MixerStats {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	stats := MixerStats{
-		ActiveUsers:     len(m.userBuffers),
-		FallbackMode:    m.fallbackMode,
-		AvgMixDuration:  m.avgMixDuration,
-		LastMixTime:     m.lastMixTime,
-	}
-
-	return stats
-}
-
-type MixerStats struct {
-	ActiveUsers     int
-	FallbackMode    bool
-	AvgMixDuration  time.Duration
-	LastMixTime     time.Time
-}

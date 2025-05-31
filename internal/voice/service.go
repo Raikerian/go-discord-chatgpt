@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -43,8 +44,7 @@ type VoiceSession struct {
 	LastAudioTime time.Time // Last time non-silent audio was received
 	State         SessionState
 	ActiveUsers   map[discord.UserID]*UserState
-	AudioBuffer   *AudioBuffer // Stores pending audio segments
-	Connection    interface{}  // WebSocket connection to OpenAI (using interface{} for now)
+	Connection    any  // WebSocket connection to OpenAI
 
 	// Audio playback queue to prevent interference
 	AudioQueue     chan []byte
@@ -76,10 +76,6 @@ type UserState struct {
 	AudioBuffer  []byte
 }
 
-type AudioBuffer struct {
-	segments [][]byte
-	mu       sync.RWMutex
-}
 
 type SessionStatus struct {
 	Active      bool
@@ -129,7 +125,7 @@ func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID 
 	}
 
 	// Check user permissions
-	if !s.canExecuteCommand(initiatorID, guildID, "start") {
+	if !s.canExecuteCommand(initiatorID) {
 		return nil, fmt.Errorf("user does not have permission to use voice commands")
 	}
 
@@ -160,7 +156,6 @@ func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID 
 		LastAudioTime:  time.Now(),
 		State:          SessionStateStarting,
 		ActiveUsers:    make(map[discord.UserID]*UserState),
-		AudioBuffer:    &AudioBuffer{},
 		AudioQueue:     make(chan []byte, 100), // Buffer up to 100 audio chunks
 		PlaybackActive: false,
 		Model:          model,
@@ -208,7 +203,7 @@ func (s *Service) Stop(ctx context.Context, guildID discord.GuildID, userID disc
 	session := sessionInterface.(*VoiceSession)
 
 	// Check permissions
-	if !s.canStopSession(userID, guildID, session) {
+	if !s.canStopSession(userID, session) {
 		return fmt.Errorf("user does not have permission to stop this session")
 	}
 
@@ -238,16 +233,12 @@ func (s *Service) GetStatus(guildID discord.GuildID) (*SessionStatus, error) {
 	}, nil
 }
 
-func (s *Service) canExecuteCommand(userID discord.UserID, guildID discord.GuildID, action string) bool {
+func (s *Service) canExecuteCommand(userID discord.UserID) bool {
 	// Check allowed users list
-	if !s.isAllowedUser(userID) {
-		return false
-	}
-
-	return true
+	return s.isAllowedUser(userID)
 }
 
-func (s *Service) canStopSession(userID discord.UserID, guildID discord.GuildID, session *VoiceSession) bool {
+func (s *Service) canStopSession(userID discord.UserID, session *VoiceSession) bool {
 	// Check if user is initiator
 	if session.InitiatorID == userID {
 		return true
@@ -266,12 +257,7 @@ func (s *Service) isAllowedUser(userID discord.UserID) bool {
 	}
 
 	userIDStr := userID.String()
-	for _, allowedID := range s.cfg.AllowedUserIDs {
-		if allowedID == userIDStr {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.cfg.AllowedUserIDs, userIDStr)
 }
 
 func (s *Service) isModelAllowed(model string) bool {
@@ -279,17 +265,12 @@ func (s *Service) isModelAllowed(model string) bool {
 		return true // If no restrictions, allow all models
 	}
 
-	for _, allowedModel := range s.cfg.AllowedModels {
-		if allowedModel == model {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(s.cfg.AllowedModels, model)
 }
 
 func (s *Service) getActiveSessionCount() int {
 	count := 0
-	s.activeSessions.Range(func(key, value interface{}) bool {
+	s.activeSessions.Range(func(key, value any) bool {
 		count++
 		return true
 	})
@@ -297,16 +278,30 @@ func (s *Service) getActiveSessionCount() int {
 }
 
 func (s *Service) processAudio(ctx context.Context, session *VoiceSession) {
-	// Set up response handlers for OpenAI Realtime
+	if err := s.setupAudioHandlers(ctx, session); err != nil {
+		return
+	}
+
+	audioChannel, err := s.voiceManager.StartReceiving(ctx, session.ChannelID)
+	if err != nil {
+		s.logger.Error("Failed to start receiving audio", zap.Error(err))
+		s.endSession(ctx, session, fmt.Sprintf("failed to start receiving audio: %v", err))
+		return
+	}
+
+	s.runAudioLoop(ctx, session, audioChannel)
+}
+
+func (s *Service) setupAudioHandlers(ctx context.Context, session *VoiceSession) error {
 	handlers := ResponseHandlers{
 		OnAudioDelta: func(ctx context.Context, audioData []byte) {
 			s.handleAudioResponse(ctx, session, audioData)
 		},
 		OnTranscript: func(ctx context.Context, transcript string) {
-			s.handleTranscript(ctx, session, transcript)
+			s.handleTranscript(session, transcript)
 		},
 		OnUserTranscript: func(ctx context.Context, transcript string) {
-			s.handleUserTranscript(ctx, session, transcript)
+			s.handleUserTranscript(session, transcript)
 		},
 		OnResponseDone: func(ctx context.Context, usage *Usage) {
 			s.handleResponseDone(ctx, session, usage)
@@ -320,25 +315,18 @@ func (s *Service) processAudio(ctx context.Context, session *VoiceSession) {
 	if err != nil {
 		s.logger.Error("Failed to set response handlers", zap.Error(err))
 		s.endSession(ctx, session, fmt.Sprintf("failed to set response handlers: %v", err))
-		return
+		return err
 	}
+	return nil
+}
 
-	// Start receiving audio
-	audioChannel, err := s.voiceManager.StartReceiving(ctx, session.ChannelID)
-	if err != nil {
-		s.logger.Error("Failed to start receiving audio", zap.Error(err))
-		s.endSession(ctx, session, fmt.Sprintf("failed to start receiving audio: %v", err))
-		return
-	}
-
-	// Audio accumulator for silence detection
+func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audioChannel <-chan *AudioPacket) {
 	var audioAccumulator [][]byte
 	var lastCommitTime time.Time
 	var lastPacketTime time.Time
 	silenceDuration := time.Duration(s.cfg.SilenceDuration) * time.Millisecond
 
-	// Create a ticker to check for audio timeouts periodically
-	audioTimeoutTicker := time.NewTicker(100 * time.Millisecond) // Check every 100ms
+	audioTimeoutTicker := time.NewTicker(AudioTimeoutCheckInterval)
 	defer audioTimeoutTicker.Stop()
 
 	s.logger.Info("Started audio processing loop",
@@ -350,91 +338,89 @@ func (s *Service) processAudio(ctx context.Context, session *VoiceSession) {
 		case packet := <-audioChannel:
 			if packet == nil {
 				s.logger.Debug("Audio channel closed, exiting processAudio")
-				return // Channel closed
+				return
 			}
 
-			// Update last packet time
+			audioAccumulator, lastCommitTime = s.processAudioPacket(
+				ctx, session, packet, audioAccumulator, lastCommitTime, silenceDuration)
 			lastPacketTime = time.Now()
 
-			s.logger.Debug("Processing audio packet",
-				zap.String("user_id", packet.UserID.String()),
-				zap.Uint32("ssrc", packet.SSRC),
-				zap.Int("opus_length", len(packet.Opus)))
-
-			// Convert Opus to PCM
-			pcm, err := s.audioProcessor.OpusToPCM(packet.Opus)
-			if err != nil {
-				s.logger.Debug("Failed to convert Opus to PCM",
-					zap.Error(err),
-					zap.String("user_id", packet.UserID.String()))
-				continue
-			}
-
-			// Detect silence
-			isSilent, energy := s.audioProcessor.DetectSilence(pcm)
-
-			// Add to mixer
-			s.audioMixer.AddUserAudio(packet.UserID, pcm, packet.Timestamp)
-
-			// Update session activity
-			s.sessionManager.UpdateActivity(session.GuildID)
-
-			if !isSilent {
-				// Non-silent audio - accumulate it
-				audioAccumulator = append(audioAccumulator, pcm)
-				s.sessionManager.UpdateAudioTime(session.GuildID)
-				lastCommitTime = time.Now()
-
-				s.logger.Debug("Non-silent audio detected",
-					zap.String("user_id", packet.UserID.String()),
-					zap.Float32("energy", energy),
-					zap.Int("accumulated_chunks", len(audioAccumulator)),
-					zap.Int("pcm_length", len(pcm)))
-			} else {
-				// Silent audio - check if we should commit accumulated audio
-				if len(audioAccumulator) > 0 && time.Since(lastCommitTime) > silenceDuration {
-					s.logger.Info("Silence detected, committing accumulated audio",
-						zap.String("user_id", packet.UserID.String()),
-						zap.Int("chunks", len(audioAccumulator)),
-						zap.Duration("silence_duration", time.Since(lastCommitTime)))
-
-					s.commitAccumulatedAudio(ctx, session, audioAccumulator)
-					audioAccumulator = nil
-				} else if len(audioAccumulator) > 0 {
-					s.logger.Debug("Silence detected but not long enough yet",
-						zap.Duration("time_since_last_commit", time.Since(lastCommitTime)),
-						zap.Duration("required_silence", silenceDuration))
-				}
-			}
-
 		case <-audioTimeoutTicker.C:
-			// Check if we have accumulated audio and enough time has passed without new packets
-			if len(audioAccumulator) > 0 && !lastPacketTime.IsZero() {
-				timeSinceLastPacket := time.Since(lastPacketTime)
-				timeSinceLastCommit := time.Since(lastCommitTime)
-
-				// Commit if we haven't received packets for the silence duration
-				// and enough time has passed since last commit
-				if timeSinceLastPacket >= silenceDuration && timeSinceLastCommit >= silenceDuration {
-					s.logger.Info("No new audio packets received, committing accumulated audio",
-						zap.Int("chunks", len(audioAccumulator)),
-						zap.Duration("time_since_last_packet", timeSinceLastPacket),
-						zap.Duration("time_since_last_commit", timeSinceLastCommit))
-
-					s.commitAccumulatedAudio(ctx, session, audioAccumulator)
-					audioAccumulator = nil
-					lastCommitTime = time.Now()
-				}
-			}
+			audioAccumulator, lastCommitTime = s.checkAudioTimeout(
+				ctx, session, audioAccumulator, lastCommitTime, lastPacketTime, silenceDuration)
 
 		case <-ctx.Done():
-			// Commit any remaining audio before exit
 			if len(audioAccumulator) > 0 {
 				s.commitAccumulatedAudio(ctx, session, audioAccumulator)
 			}
 			return
 		}
 	}
+}
+
+func (s *Service) processAudioPacket(ctx context.Context, session *VoiceSession, packet *AudioPacket, 
+	audioAccumulator [][]byte, lastCommitTime time.Time, silenceDuration time.Duration) ([][]byte, time.Time) {
+	
+	s.logger.Debug("Processing audio packet",
+		zap.String("user_id", packet.UserID.String()),
+		zap.Uint32("ssrc", packet.SSRC),
+		zap.Int("opus_length", len(packet.Opus)))
+
+	pcm, err := s.audioProcessor.OpusToPCM(packet.Opus)
+	if err != nil {
+		s.logger.Debug("Failed to convert Opus to PCM",
+			zap.Error(err),
+			zap.String("user_id", packet.UserID.String()))
+		return audioAccumulator, lastCommitTime
+	}
+
+	isSilent, energy := s.audioProcessor.DetectSilence(pcm)
+	s.audioMixer.AddUserAudio(packet.UserID, pcm, packet.Timestamp)
+	s.sessionManager.UpdateActivity(session.GuildID)
+
+	if !isSilent {
+		audioAccumulator = append(audioAccumulator, pcm)
+		s.sessionManager.UpdateAudioTime(session.GuildID)
+		lastCommitTime = time.Now()
+
+		s.logger.Debug("Non-silent audio detected",
+			zap.String("user_id", packet.UserID.String()),
+			zap.Float32("energy", energy),
+			zap.Int("accumulated_chunks", len(audioAccumulator)),
+			zap.Int("pcm_length", len(pcm)))
+	} else if len(audioAccumulator) > 0 && time.Since(lastCommitTime) > silenceDuration {
+		s.logger.Info("Silence detected, committing accumulated audio",
+			zap.String("user_id", packet.UserID.String()),
+			zap.Int("chunks", len(audioAccumulator)),
+			zap.Duration("silence_duration", time.Since(lastCommitTime)))
+
+		s.commitAccumulatedAudio(ctx, session, audioAccumulator)
+		audioAccumulator = nil
+	}
+
+	return audioAccumulator, lastCommitTime
+}
+
+func (s *Service) checkAudioTimeout(ctx context.Context, session *VoiceSession, 
+	audioAccumulator [][]byte, lastCommitTime, lastPacketTime time.Time, silenceDuration time.Duration) ([][]byte, time.Time) {
+	
+	if len(audioAccumulator) > 0 && !lastPacketTime.IsZero() {
+		timeSinceLastPacket := time.Since(lastPacketTime)
+		timeSinceLastCommit := time.Since(lastCommitTime)
+
+		if timeSinceLastPacket >= silenceDuration && timeSinceLastCommit >= silenceDuration {
+			s.logger.Info("No new audio packets received, committing accumulated audio",
+				zap.Int("chunks", len(audioAccumulator)),
+				zap.Duration("time_since_last_packet", timeSinceLastPacket),
+				zap.Duration("time_since_last_commit", timeSinceLastCommit))
+
+			s.commitAccumulatedAudio(ctx, session, audioAccumulator)
+			audioAccumulator = nil
+			lastCommitTime = time.Now()
+		}
+	}
+
+	return audioAccumulator, lastCommitTime
 }
 
 func (s *Service) commitAccumulatedAudio(ctx context.Context, session *VoiceSession, audioChunks [][]byte) {
@@ -555,7 +541,7 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 	// Critical: Frame timing must be exact to prevent audio artifacts
 
 	// 20ms at 24kHz mono = 480 samples = 960 bytes (16-bit PCM)
-	const frameSizeBytes = 960 // 20ms at 24kHz mono in bytes
+	const frameSizeBytes = OpenAIFrameSize * 2 // 20ms at 24kHz mono in bytes (16-bit samples)
 	const frameDurationMs = 20 // Each frame represents 20ms of audio
 
 	frameIndex := 0
@@ -571,10 +557,7 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 		// Calculate when this frame should be sent (frame-paced timing)
 		expectedFrameTime := frameStartTime.Add(time.Duration(frameIndex) * 20 * time.Millisecond)
 
-		end := offset + frameSizeBytes
-		if end > len(audioData) {
-			end = len(audioData)
-		}
+		end := min(offset+frameSizeBytes, len(audioData))
 
 		frameData := audioData[offset:end]
 		actualFrameSize := len(frameData)
@@ -651,28 +634,8 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 		zap.Duration("total_elapsed", time.Since(frameStartTime)))
 }
 
-func (s *Service) playAudioWithTiming(ctx context.Context, session *VoiceSession, opusData []byte, duration time.Duration) {
-	// Play the audio immediately, but then wait for the calculated duration
-	// before allowing the next chunk to be processed
 
-	err := s.voiceManager.PlayAudio(ctx, session.ChannelID, opusData)
-	if err != nil {
-		s.logger.Error("Failed to play audio in Discord", zap.Error(err))
-		return
-	}
-
-	s.logger.Debug("Played audio chunk with timing",
-		zap.Int("opus_size", len(opusData)),
-		zap.Duration("duration", duration))
-
-	// Wait for the duration of this audio chunk to maintain proper timing
-	// This prevents audio chunks from being played faster than they should be heard
-	if duration > 0 {
-		time.Sleep(duration)
-	}
-}
-
-func (s *Service) handleTranscript(ctx context.Context, session *VoiceSession, transcript string) {
+func (s *Service) handleTranscript(session *VoiceSession, transcript string) {
 	if transcript == "" {
 		return
 	}
@@ -685,7 +648,7 @@ func (s *Service) handleTranscript(ctx context.Context, session *VoiceSession, t
 	// (This could be configured via a setting)
 }
 
-func (s *Service) handleUserTranscript(ctx context.Context, session *VoiceSession, transcript string) {
+func (s *Service) handleUserTranscript(session *VoiceSession, transcript string) {
 	if transcript == "" {
 		return
 	}
@@ -814,7 +777,7 @@ func (s *Service) runWatchdog(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			s.activeSessions.Range(func(key, value interface{}) bool {
+			s.activeSessions.Range(func(key, value any) bool {
 				session := value.(*VoiceSession)
 
 				// Check inactivity timeout
@@ -850,7 +813,7 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	}
 
 	// End all active sessions
-	s.activeSessions.Range(func(key, value interface{}) bool {
+	s.activeSessions.Range(func(key, value any) bool {
 		session := value.(*VoiceSession)
 		s.endSession(ctx, session, "service shutdown")
 		return true

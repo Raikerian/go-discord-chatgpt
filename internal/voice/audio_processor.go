@@ -262,7 +262,7 @@ func (p *audioProcessor) PCMToOpus(pcm []byte) ([]byte, error) {
 	// We must ensure proper frame size for Discord compatibility
 
 	// Calculate 20ms frame size at 24kHz mono (input)
-	samplesPerFrame24k := 480 // 20ms at 24kHz mono
+	samplesPerFrame24k := OpenAIFrameSize // 20ms at 24kHz mono
 
 	// Always normalize to 20ms frames for Discord compatibility
 	// Discord voice protocol is strict about frame timing
@@ -275,7 +275,7 @@ func (p *audioProcessor) PCMToOpus(pcm []byte) ([]byte, error) {
 			zap.Float64("input_duration_ms", float64(len(pcm24Mono))/24000.0*1000.0))
 	}
 
-	// Create exactly 20ms of audio (480 samples at 24kHz mono)
+	// Create exactly 20ms of audio (OpenAIFrameSize samples at 24kHz mono)
 	processedMono := make([]int16, targetSamples)
 
 	if len(pcm24Mono) >= targetSamples {
@@ -298,7 +298,7 @@ func (p *audioProcessor) PCMToOpus(pcm []byte) ([]byte, error) {
 	p.mu.RUnlock()
 
 	// Discord expects exactly 960 samples per channel (1920 total) for 20ms at 48kHz stereo
-	discordFrameSamples := 960 * 2 // 20ms at 48kHz stereo
+	discordFrameSamples := DiscordFrameSize * 2 // 20ms at 48kHz stereo
 
 	if len(pcm48Stereo) != discordFrameSamples {
 		p.logger.Warn("Frame size mismatch for Discord",
@@ -319,7 +319,7 @@ func (p *audioProcessor) PCMToOpus(pcm []byte) ([]byte, error) {
 	}
 
 	// Encode to Opus with Discord's expected 20ms frame size
-	// Use DiscordFrameSize (960) as the frame size parameter for gopus
+	// Use DiscordFrameSize as the frame size parameter for gopus
 	maxOutputSize := 4000 // Conservative buffer size for Opus output
 
 	opusData, err := encoder.Encode(pcm48Stereo, DiscordFrameSize, maxOutputSize)
@@ -637,7 +637,7 @@ func (p *audioProcessor) validatePCMFormat(pcm []byte) error {
 		}
 	}
 
-	if allZero && len(samples) > 480 { // More than 20ms of silence is suspicious
+	if allZero && len(samples) > OpenAIFrameSize { // More than 20ms of silence is suspicious
 		p.logger.Warn("Long period of complete silence detected",
 			zap.Int("samples", len(samples)),
 			zap.Float64("duration_ms", durationMs))

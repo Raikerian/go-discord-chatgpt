@@ -20,7 +20,7 @@ type RealtimeProvider interface {
 
 	// Commit audio buffer (triggers processing)
 	CommitAudio(ctx context.Context) error
-	
+
 	// Generate response from committed audio
 	GenerateResponse(ctx context.Context) error
 
@@ -62,11 +62,11 @@ type Usage struct {
 }
 
 type ResponseHandlers struct {
-	OnAudioDelta      func(ctx context.Context, audioData []byte)
-	OnTranscript      func(ctx context.Context, transcript string)      // AI response transcript
-	OnUserTranscript  func(ctx context.Context, transcript string)      // User input transcript
-	OnResponseDone    func(ctx context.Context, usage *Usage)
-	OnError           func(ctx context.Context, err error)
+	OnAudioDelta     func(ctx context.Context, audioData []byte)
+	OnTranscript     func(ctx context.Context, transcript string) // AI response transcript
+	OnUserTranscript func(ctx context.Context, transcript string) // User input transcript
+	OnResponseDone   func(ctx context.Context, usage *Usage)
+	OnError          func(ctx context.Context, err error)
 }
 
 type openAIRealtimeProvider struct {
@@ -118,7 +118,7 @@ func (p *openAIRealtimeProvider) Connect(ctx context.Context, model string) (*Re
 
 	// Create handler with event handling function
 	p.handler = openairt.NewConnHandler(ctx, conn, p.handleServerEvent)
-	
+
 	// Start the handler to begin processing events
 	go p.handler.Start()
 
@@ -290,7 +290,7 @@ func (p *openAIRealtimeProvider) Close() error {
 func (p *openAIRealtimeProvider) handleServerEvent(ctx context.Context, event openairt.ServerEvent) {
 	p.logger.Debug("Received server event",
 		zap.String("event_type", string(event.ServerEventType())))
-		
+
 	switch event.ServerEventType() {
 	case openairt.ServerEventTypeResponseAudioDelta:
 		delta := event.(openairt.ResponseAudioDeltaEvent)
@@ -301,7 +301,7 @@ func (p *openAIRealtimeProvider) handleServerEvent(ctx context.Context, event op
 				p.logger.Error("Failed to decode audio delta", zap.Error(err))
 				return
 			}
-			p.logger.Info("Received audio delta from OpenAI",
+			p.logger.Debug("Received audio delta from OpenAI",
 				zap.Int("audio_size", len(audioData)))
 			p.handlers.OnAudioDelta(ctx, audioData)
 		}

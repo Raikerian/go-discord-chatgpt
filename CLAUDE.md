@@ -128,3 +128,7 @@ See `DEPLOYMENT.md` for detailed deployment procedures.
 ## Go Documentation Tips
 
 - Use the `go doc <package>` command to access comprehensive API documentation for any Go package, including interfaces, types, functions, and usage examples. This works for both standard library packages and third-party dependencies.
+
+## Dependency Management
+
+- Use `go get` to add dependencies to the go.mod instead of manually editing go.mod

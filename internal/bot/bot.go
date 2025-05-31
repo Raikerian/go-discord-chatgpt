@@ -94,10 +94,10 @@ func (b *Bot) Start(ctx context.Context) error {
 	// not for individual interactions.
 	b.Session.AddHandler(func(e *gateway.InteractionCreateEvent) {
 		// Create a new context with a timeout for each interaction.
-		interactionCtx, cancel := context.WithTimeout(context.Background(), interactionTimeout)
-		defer cancel()
+		// interactionCtx, cancel := context.WithTimeout(context.Background(), interactionTimeout)
+		// defer cancel()
 
-		handleInteraction(interactionCtx, b.Session, e, b.Logger, b.CmdManager)
+		handleInteraction(context.Background(), b.Session, e, b.Logger, b.CmdManager)
 	})
 
 	// Add MessageCreateEvent handler

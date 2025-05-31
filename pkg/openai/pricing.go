@@ -10,9 +10,11 @@ import (
 
 // TokenPricing represents the cost per million tokens for input, cached input, and output.
 type TokenPricing struct {
-	InputPerMillion  float64  `json:"input_per_million"`  // Cost per 1 million input tokens in USD
-	CachedPerMillion *float64 `json:"cached_per_million"` // Cost per 1 million cached input tokens in USD (nil if not supported)
-	OutputPerMillion *float64 `json:"output_per_million"` // Cost per 1 million output tokens in USD (nil if not supported)
+	InputPerMillion       float64  `json:"input_per_million"`       // Cost per 1 million input tokens in USD
+	CachedPerMillion      *float64 `json:"cached_per_million"`      // Cost per 1 million cached input tokens in USD (nil if not supported)
+	OutputPerMillion      *float64 `json:"output_per_million"`      // Cost per 1 million output tokens in USD (nil if not supported)
+	AudioInputPerMillion  *float64 `json:"audio_input_per_million"`  // Cost per 1 million audio input tokens in USD (nil if not supported)
+	AudioOutputPerMillion *float64 `json:"audio_output_per_million"` // Cost per 1 million audio output tokens in USD (nil if not supported)
 }
 
 // ModelInfo contains detailed information about an OpenAI model.
@@ -44,6 +46,9 @@ type PricingService interface {
 
 	// CalculateCachedTokenCost calculates the cost with cached input tokens.
 	CalculateCachedTokenCost(modelName string, cachedInputTokens, newInputTokens, outputTokens int) (float64, error)
+
+	// CalculateAudioTokenCost calculates the cost for audio input/output tokens.
+	CalculateAudioTokenCost(modelName string, inputAudioTokens, outputAudioTokens int) (float64, error)
 
 	// GetAvailableModels returns a list of all available model names.
 	GetAvailableModels() []string
@@ -163,6 +168,30 @@ func (p *pricingService) CalculateCachedTokenCost(modelName string, cachedInputT
 	if model.Pricing.OutputPerMillion != nil {
 		outputCost := (float64(outputTokens) / 1_000_000) * *model.Pricing.OutputPerMillion
 		totalCost += outputCost
+	}
+
+	return totalCost, nil
+}
+
+// CalculateAudioTokenCost calculates the cost for audio input/output tokens.
+func (p *pricingService) CalculateAudioTokenCost(modelName string, inputAudioTokens, outputAudioTokens int) (float64, error) {
+	model, err := p.GetModelPricing(modelName)
+	if err != nil {
+		return 0, err
+	}
+
+	var totalCost float64
+
+	// Calculate audio input cost (if supported)
+	if model.Pricing.AudioInputPerMillion != nil {
+		audioInputCost := (float64(inputAudioTokens) / 1_000_000) * *model.Pricing.AudioInputPerMillion
+		totalCost += audioInputCost
+	}
+
+	// Calculate audio output cost (if supported)
+	if model.Pricing.AudioOutputPerMillion != nil {
+		audioOutputCost := (float64(outputAudioTokens) / 1_000_000) * *model.Pricing.AudioOutputPerMillion
+		totalCost += audioOutputCost
 	}
 
 	return totalCost, nil

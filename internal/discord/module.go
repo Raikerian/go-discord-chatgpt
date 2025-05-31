@@ -8,6 +8,8 @@ import (
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/gateway"
 	"github.com/diamondburned/arikawa/v3/session"
+	"github.com/diamondburned/arikawa/v3/state"
+	"github.com/diamondburned/arikawa/v3/state/store/defaultstore"
 	"go.uber.org/fx"
 	"go.uber.org/zap"
 
@@ -18,6 +20,7 @@ import (
 var Module = fx.Module("discord",
 	fx.Provide(
 		NewSession,
+		NewState,
 		ProvideApplicationID,
 	),
 )
@@ -47,7 +50,7 @@ func NewSession(params SessionParams) (SessionResult, error) {
 	}
 
 	s := session.New("Bot " + params.Cfg.Discord.BotToken)
-	s.AddIntents(gateway.IntentGuilds | gateway.IntentGuildMessages | gateway.IntentGuildIntegrations)
+	s.AddIntents(gateway.IntentGuilds | gateway.IntentGuildMessages | gateway.IntentGuildIntegrations | gateway.IntentGuildVoiceStates | gateway.IntentGuildMembers)
 
 	params.LC.Append(fx.Hook{
 		OnStart: func(ctx context.Context) error {
@@ -63,6 +66,32 @@ func NewSession(params SessionParams) (SessionResult, error) {
 	})
 
 	return SessionResult{Session: s}, nil
+}
+
+// StateParams holds dependencies for NewState.
+type StateParams struct {
+	fx.In
+	Session *session.Session
+	Logger  *zap.Logger
+}
+
+// StateResult holds results from NewState.
+type StateResult struct {
+	fx.Out
+	State *state.State
+}
+
+// NewState creates a State wrapper around the Session.
+func NewState(params StateParams) StateResult {
+	// Create a new cabinet with default store implementations
+	cabinet := defaultstore.New()
+
+	// Create state from existing session with proper cabinet
+	st := state.NewFromSession(params.Session, cabinet)
+
+	params.Logger.Info("Created Discord state from session with default stores")
+
+	return StateResult{State: st}
 }
 
 // ProvideApplicationID extracts the ApplicationID from config.

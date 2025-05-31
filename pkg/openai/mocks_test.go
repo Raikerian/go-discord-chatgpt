@@ -35,6 +35,62 @@ func (_m *MockPricingService) EXPECT() *MockPricingService_Expecter {
 	return &MockPricingService_Expecter{mock: &_m.Mock}
 }
 
+// CalculateAudioTokenCost provides a mock function for the type MockPricingService
+func (_mock *MockPricingService) CalculateAudioTokenCost(modelName string, inputAudioTokens int, outputAudioTokens int) (float64, error) {
+	ret := _mock.Called(modelName, inputAudioTokens, outputAudioTokens)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CalculateAudioTokenCost")
+	}
+
+	var r0 float64
+	var r1 error
+	if returnFunc, ok := ret.Get(0).(func(string, int, int) (float64, error)); ok {
+		return returnFunc(modelName, inputAudioTokens, outputAudioTokens)
+	}
+	if returnFunc, ok := ret.Get(0).(func(string, int, int) float64); ok {
+		r0 = returnFunc(modelName, inputAudioTokens, outputAudioTokens)
+	} else {
+		r0 = ret.Get(0).(float64)
+	}
+	if returnFunc, ok := ret.Get(1).(func(string, int, int) error); ok {
+		r1 = returnFunc(modelName, inputAudioTokens, outputAudioTokens)
+	} else {
+		r1 = ret.Error(1)
+	}
+	return r0, r1
+}
+
+// MockPricingService_CalculateAudioTokenCost_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CalculateAudioTokenCost'
+type MockPricingService_CalculateAudioTokenCost_Call struct {
+	*mock.Call
+}
+
+// CalculateAudioTokenCost is a helper method to define mock.On call
+//   - modelName
+//   - inputAudioTokens
+//   - outputAudioTokens
+func (_e *MockPricingService_Expecter) CalculateAudioTokenCost(modelName interface{}, inputAudioTokens interface{}, outputAudioTokens interface{}) *MockPricingService_CalculateAudioTokenCost_Call {
+	return &MockPricingService_CalculateAudioTokenCost_Call{Call: _e.mock.On("CalculateAudioTokenCost", modelName, inputAudioTokens, outputAudioTokens)}
+}
+
+func (_c *MockPricingService_CalculateAudioTokenCost_Call) Run(run func(modelName string, inputAudioTokens int, outputAudioTokens int)) *MockPricingService_CalculateAudioTokenCost_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].(int), args[2].(int))
+	})
+	return _c
+}
+
+func (_c *MockPricingService_CalculateAudioTokenCost_Call) Return(f float64, err error) *MockPricingService_CalculateAudioTokenCost_Call {
+	_c.Call.Return(f, err)
+	return _c
+}
+
+func (_c *MockPricingService_CalculateAudioTokenCost_Call) RunAndReturn(run func(modelName string, inputAudioTokens int, outputAudioTokens int) (float64, error)) *MockPricingService_CalculateAudioTokenCost_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CalculateCachedTokenCost provides a mock function for the type MockPricingService
 func (_mock *MockPricingService) CalculateCachedTokenCost(modelName string, cachedInputTokens int, newInputTokens int, outputTokens int) (float64, error) {
 	ret := _mock.Called(modelName, cachedInputTokens, newInputTokens, outputTokens)

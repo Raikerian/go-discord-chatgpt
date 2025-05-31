@@ -43,6 +43,68 @@ openai:
   # Maximum number of concurrent requests to OpenAI.
   max_concurrent_requests: 5
 
+voice:
+  # Default model for voice interactions
+  default_model: "gpt-4o-mini-realtime-preview"
+  
+  # List of allowed realtime models
+  allowed_models:
+    - "gpt-4o-mini-realtime-preview"
+    - "gpt-4o-realtime-preview"
+  
+  # Voice profile for AI responses
+  # Options: "shimmer", "alloy", "echo", "nova", "onyx"
+  voice_profile: "shimmer"
+  
+  # Audio quality setting
+  # Options: "low", "medium", "high"
+  audio_quality: "medium"
+  
+  # Sample rate for audio processing (required by OpenAI)
+  sample_rate: 24000
+  
+  # Energy threshold for silence detection (0.0 to 1.0)
+  silence_threshold: 0.01
+  
+  # Duration of silence in milliseconds before processing audio
+  silence_duration_ms: 1500
+  
+  # Session timeout in seconds due to inactivity
+  inactivity_timeout: 120  # 2 minutes
+  
+  # Maximum session length in minutes
+  max_session_length: 10   # 10 minutes max per session
+  
+  # Maximum concurrent voice sessions across all guilds
+  max_concurrent_sessions: 10
+  
+  # List of Discord User IDs allowed to use voice commands
+  # If empty, all users can use voice commands
+  allowed_user_ids:
+    - "YOUR_USER_ID_HERE"
+    # - "ANOTHER_USER_ID_HERE"
+  
+  # Show cost warnings when starting sessions
+  show_cost_warnings: true
+  
+  # Track and display session costs in real-time
+  track_session_costs: true
+  
+  # Auto-stop session if cost exceeds this amount in USD
+  max_cost_per_session: 5.0
+  
+  # Optional: Separate API key for OpenAI Realtime
+  # If not provided, will use the main OpenAI API key
+  # realtime_api_key: "YOUR_REALTIME_API_KEY_HERE"
+  
+  # Voice Activity Detection mode
+  # Options: "server_vad", "client_vad", "none"
+  vad_mode: "client_vad"
+  
+  # Enable OpenAI's automatic turn detection
+  # Recommended: false (we handle turn detection ourselves)
+  turn_detection: false
+
 # Log level for the application.
 # Supported values: "debug", "info", "warn", "error", "dpanic", "panic", "fatal"
 log_level: "info"

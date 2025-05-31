@@ -17,7 +17,10 @@ import (
 	"github.com/Raikerian/go-discord-chatgpt/internal/discord"
 	"github.com/Raikerian/go-discord-chatgpt/internal/infrastructure"
 	"github.com/Raikerian/go-discord-chatgpt/internal/openai"
+	"github.com/Raikerian/go-discord-chatgpt/internal/voice"
+
 	pkginfra "github.com/Raikerian/go-discord-chatgpt/pkg/infrastructure"
+	_ "github.com/WqyJh/go-openai-realtime"
 
 	"go.uber.org/fx"
 )
@@ -38,6 +41,7 @@ func main() {
 
 		// Application modules
 		chat.Module,
+		voice.Module,
 		commands.Module,
 		bot.Module,
 

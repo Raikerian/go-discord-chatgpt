@@ -25,5 +25,10 @@ var Module = fx.Module("commands",
 			fx.As(new(Command)),
 			fx.ResultTags(`group:"commands"`),
 		),
+		fx.Annotate(
+			NewVoiceCommand,
+			fx.As(new(Command)),
+			fx.ResultTags(`group:"commands"`),
+		),
 	),
 )

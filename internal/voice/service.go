@@ -2,7 +2,11 @@ package voice
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -44,7 +48,7 @@ type VoiceSession struct {
 	LastAudioTime time.Time // Last time non-silent audio was received
 	State         SessionState
 	ActiveUsers   map[discord.UserID]*UserState
-	Connection    any  // WebSocket connection to OpenAI
+	Connection    any // WebSocket connection to OpenAI
 
 	// Audio playback queue to prevent interference
 	AudioQueue     chan []byte
@@ -72,10 +76,7 @@ type UserState struct {
 	UserID       discord.UserID
 	SSRC         uint32
 	LastActivity time.Time
-	IsSpeaking   bool
-	AudioBuffer  []byte
 }
-
 
 type SessionStatus struct {
 	Active      bool
@@ -321,17 +322,16 @@ func (s *Service) setupAudioHandlers(ctx context.Context, session *VoiceSession)
 }
 
 func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audioChannel <-chan *AudioPacket) {
-	var audioAccumulator [][]byte
-	var lastCommitTime time.Time
 	var lastPacketTime time.Time
-	silenceDuration := time.Duration(s.cfg.SilenceDuration) * time.Millisecond
+	// Use a shorter timeout for more responsive audio processing
+	timeoutDuration := 1500 * time.Millisecond // 1500ms of no packets = commit audio
 
-	audioTimeoutTicker := time.NewTicker(AudioTimeoutCheckInterval)
+	audioTimeoutTicker := time.NewTicker(100 * time.Millisecond) // Check every 100ms
 	defer audioTimeoutTicker.Stop()
 
 	s.logger.Info("Started audio processing loop",
 		zap.String("guild_id", session.GuildID.String()),
-		zap.Duration("silence_duration", silenceDuration))
+		zap.Duration("timeout_duration", timeoutDuration))
 
 	for {
 		select {
@@ -341,111 +341,175 @@ func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audio
 				return
 			}
 
-			audioAccumulator, lastCommitTime = s.processAudioPacket(
-				ctx, session, packet, audioAccumulator, lastCommitTime, silenceDuration)
+			s.processAudioPacket(session, packet)
 			lastPacketTime = time.Now()
 
 		case <-audioTimeoutTicker.C:
-			audioAccumulator, lastCommitTime = s.checkAudioTimeout(
-				ctx, session, audioAccumulator, lastCommitTime, lastPacketTime, silenceDuration)
+			// Check if we haven't received packets for the timeout duration
+			if !lastPacketTime.IsZero() && time.Since(lastPacketTime) > timeoutDuration {
+				s.logger.Info("Audio timeout reached, committing audio",
+					zap.Duration("since_last_packet", time.Since(lastPacketTime)))
+
+				// Commit audio from mixer
+				s.commitMixerAudio(ctx, session)
+				lastPacketTime = time.Time{} // Reset to prevent multiple commits
+			}
 
 		case <-ctx.Done():
-			if len(audioAccumulator) > 0 {
-				s.commitAccumulatedAudio(ctx, session, audioAccumulator)
-			}
+			// Final commit before exiting
+			s.commitMixerAudio(ctx, session)
 			return
 		}
 	}
 }
 
-func (s *Service) processAudioPacket(ctx context.Context, session *VoiceSession, packet *AudioPacket, 
-	audioAccumulator [][]byte, lastCommitTime time.Time, silenceDuration time.Duration) ([][]byte, time.Time) {
-	
+func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket) {
 	s.logger.Debug("Processing audio packet",
 		zap.String("user_id", packet.UserID.String()),
 		zap.Uint32("ssrc", packet.SSRC),
-		zap.Int("opus_length", len(packet.Opus)))
+		zap.Int("opus_length", len(packet.Opus)),
+		zap.Uint32("rtp_timestamp", packet.RTPTimestamp),
+		zap.Uint16("sequence", packet.Sequence))
 
 	pcm, err := s.audioProcessor.OpusToPCM(packet.Opus)
 	if err != nil {
 		s.logger.Debug("Failed to convert Opus to PCM",
 			zap.Error(err),
 			zap.String("user_id", packet.UserID.String()))
-		return audioAccumulator, lastCommitTime
-	}
-
-	isSilent, energy := s.audioProcessor.DetectSilence(pcm)
-	s.audioMixer.AddUserAudio(packet.UserID, pcm, packet.Timestamp)
-	s.sessionManager.UpdateActivity(session.GuildID)
-
-	if !isSilent {
-		audioAccumulator = append(audioAccumulator, pcm)
-		s.sessionManager.UpdateAudioTime(session.GuildID)
-		lastCommitTime = time.Now()
-
-		s.logger.Debug("Non-silent audio detected",
-			zap.String("user_id", packet.UserID.String()),
-			zap.Float32("energy", energy),
-			zap.Int("accumulated_chunks", len(audioAccumulator)),
-			zap.Int("pcm_length", len(pcm)))
-	} else if len(audioAccumulator) > 0 && time.Since(lastCommitTime) > silenceDuration {
-		s.logger.Info("Silence detected, committing accumulated audio",
-			zap.String("user_id", packet.UserID.String()),
-			zap.Int("chunks", len(audioAccumulator)),
-			zap.Duration("silence_duration", time.Since(lastCommitTime)))
-
-		s.commitAccumulatedAudio(ctx, session, audioAccumulator)
-		audioAccumulator = nil
-	}
-
-	return audioAccumulator, lastCommitTime
-}
-
-func (s *Service) checkAudioTimeout(ctx context.Context, session *VoiceSession, 
-	audioAccumulator [][]byte, lastCommitTime, lastPacketTime time.Time, silenceDuration time.Duration) ([][]byte, time.Time) {
-	
-	if len(audioAccumulator) > 0 && !lastPacketTime.IsZero() {
-		timeSinceLastPacket := time.Since(lastPacketTime)
-		timeSinceLastCommit := time.Since(lastCommitTime)
-
-		if timeSinceLastPacket >= silenceDuration && timeSinceLastCommit >= silenceDuration {
-			s.logger.Info("No new audio packets received, committing accumulated audio",
-				zap.Int("chunks", len(audioAccumulator)),
-				zap.Duration("time_since_last_packet", timeSinceLastPacket),
-				zap.Duration("time_since_last_commit", timeSinceLastCommit))
-
-			s.commitAccumulatedAudio(ctx, session, audioAccumulator)
-			audioAccumulator = nil
-			lastCommitTime = time.Now()
-		}
-	}
-
-	return audioAccumulator, lastCommitTime
-}
-
-func (s *Service) commitAccumulatedAudio(ctx context.Context, session *VoiceSession, audioChunks [][]byte) {
-	s.logger.Info("commitAccumulatedAudio called",
-		zap.String("guild_id", session.GuildID.String()),
-		zap.Int("chunks", len(audioChunks)))
-
-	if len(audioChunks) == 0 {
-		s.logger.Warn("commitAccumulatedAudio called with empty chunks")
 		return
 	}
 
-	// Get mixed audio from the accumulated chunks
-	duration := time.Duration(len(audioChunks)) * 20 * time.Millisecond
-	s.logger.Debug("Getting mixed audio",
-		zap.Duration("duration", duration))
+	// Add all audio to mixer without silence detection
+	// Use the RTP-aware method to track timing properly
+	s.audioMixer.AddUserAudioWithRTP(packet.UserID, pcm, packet.Timestamp, packet.RTPTimestamp, packet.Sequence)
+	s.sessionManager.UpdateActivity(session.GuildID)
+	s.sessionManager.UpdateAudioTime(session.GuildID)
 
-	mixedAudio, err := s.audioMixer.GetMixedAudio(duration)
+	s.logger.Debug("Added audio to mixer",
+		zap.String("user_id", packet.UserID.String()),
+		zap.Int("pcm_length", len(pcm)),
+		zap.Time("timestamp", packet.Timestamp),
+		zap.Uint32("rtp_timestamp", packet.RTPTimestamp))
+}
+
+// commitMixerAudio gets mixed audio from the mixer and sends it to OpenAI
+func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
+	// Get all available audio and immediately flush buffers
+	// This atomic operation ensures we don't miss any audio or leave stale data
+	mixedAudio, actualDuration, err := s.audioMixer.GetAllAvailableMixedAudioAndFlush()
 	if err != nil {
 		s.logger.Error("Failed to mix audio", zap.Error(err))
 		return
 	}
 
+	// Check if we got any audio
+	if len(mixedAudio) == 0 || actualDuration == 0 {
+		s.logger.Debug("No audio to commit")
+		return
+	}
+
+	s.logger.Info("Committing mixer audio",
+		zap.String("guild_id", session.GuildID.String()),
+		zap.Duration("actual_duration", actualDuration),
+		zap.Int("audio_bytes", len(mixedAudio)))
+
+	// Perform Voice Activity Detection (VAD) with better algorithm
+	isSilent, energyLevel := s.detectVoiceActivity(mixedAudio)
+
+	if isSilent {
+		s.logger.Debug("Audio is mostly silence, skipping",
+			zap.Float32("energy_level", energyLevel),
+			zap.Duration("duration", actualDuration))
+		return
+	}
+
 	s.logger.Debug("Mixed audio obtained",
+		zap.Int("size", len(mixedAudio)),
+		zap.Float32("energy_level", energyLevel),
+		zap.Duration("actual_duration", actualDuration))
+
+	// Continue with the rest of the processing
+	s.processMixedAudio(ctx, session, mixedAudio)
+}
+
+// detectVoiceActivity performs Voice Activity Detection on the mixed audio
+func (s *Service) detectVoiceActivity(audio []byte) (isSilent bool, energyLevel float32) {
+	if len(audio) < 2 {
+		return true, 0.0
+	}
+
+	// Calculate RMS energy
+	var sum float64
+	sampleCount := len(audio) / 2
+	peakAmplitude := int16(0)
+
+	for i := 0; i < len(audio)-1; i += 2 {
+		sample := int16(uint16(audio[i]) | (uint16(audio[i+1]) << 8))
+
+		// Track peak for additional analysis
+		absSample := sample
+		if absSample < 0 {
+			absSample = -absSample
+		}
+		if absSample > peakAmplitude {
+			peakAmplitude = absSample
+		}
+
+		sampleFloat := float64(sample) / 32768.0
+		sum += sampleFloat * sampleFloat
+	}
+
+	if sampleCount == 0 {
+		return true, 0.0
+	}
+
+	rms := math.Sqrt(sum / float64(sampleCount))
+	energyLevel = float32(rms)
+
+	// Dynamic threshold based on content
+	// Human speech typically has RMS values between 0.01 and 0.3
+	const (
+		silenceThreshold = 0.008 // Below this is definitely silence
+		speechThreshold  = 0.015 // Above this likely contains speech
+	)
+
+	// Additional check: if peak amplitude is very low, it's likely silence
+	peakNormalized := float32(peakAmplitude) / 32768.0
+	if peakNormalized < 0.01 {
+		return true, energyLevel
+	}
+
+	// Use RMS for primary detection
+	isSilent = energyLevel < silenceThreshold
+
+	// If we're in the ambiguous zone, check for speech patterns
+	if energyLevel >= silenceThreshold && energyLevel < speechThreshold {
+		// Could implement zero-crossing rate or other features here
+		// For now, we'll be conservative and process borderline audio
+		isSilent = false
+	}
+
+	return isSilent, energyLevel
+}
+
+func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, mixedAudio []byte) {
+	s.logger.Info("Processing mixed audio",
+		zap.String("guild_id", session.GuildID.String()),
 		zap.Int("size", len(mixedAudio)))
+
+	// DEBUG: Save audio to WAV files for debugging
+	// Set this to true to enable WAV file saving
+	const debugSaveWAV = false
+	if debugSaveWAV {
+		// Save what each user has in the mixer
+		s.saveUserBuffersDebug(session.GuildID)
+
+		// Save the mixed audio
+		if err := s.saveDebugWAV(mixedAudio, session.GuildID, "mixed"); err != nil {
+			s.logger.Error("Failed to save mixed audio WAV", zap.Error(err))
+		}
+		return
+	}
 
 	// Convert PCM to base64 for OpenAI
 	audioBase64, err := s.audioProcessor.PCMToBase64(mixedAudio)
@@ -479,7 +543,6 @@ func (s *Service) commitAccumulatedAudio(ctx context.Context, session *VoiceSess
 	}
 
 	s.logger.Info("Audio successfully committed to OpenAI",
-		zap.Int("chunks", len(audioChunks)),
 		zap.Int("mixed_audio_size", len(mixedAudio)),
 		zap.Int("base64_size", len(audioBase64)))
 }
@@ -542,7 +605,7 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 
 	// 20ms at 24kHz mono = 480 samples = 960 bytes (16-bit PCM)
 	const frameSizeBytes = OpenAIFrameSize * 2 // 20ms at 24kHz mono in bytes (16-bit samples)
-	const frameDurationMs = 20 // Each frame represents 20ms of audio
+	const frameDurationMs = 20                 // Each frame represents 20ms of audio
 
 	frameIndex := 0
 	frameStartTime := time.Now()
@@ -634,12 +697,7 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 		zap.Duration("total_elapsed", time.Since(frameStartTime)))
 }
 
-
 func (s *Service) handleTranscript(session *VoiceSession, transcript string) {
-	if transcript == "" {
-		return
-	}
-
 	s.logger.Info("AI transcript",
 		zap.String("guild_id", session.GuildID.String()),
 		zap.String("transcript", transcript))
@@ -649,10 +707,6 @@ func (s *Service) handleTranscript(session *VoiceSession, transcript string) {
 }
 
 func (s *Service) handleUserTranscript(session *VoiceSession, transcript string) {
-	if transcript == "" {
-		return
-	}
-
 	s.logger.Info("User transcript",
 		zap.String("guild_id", session.GuildID.String()),
 		zap.String("user_id", session.InitiatorID.String()),
@@ -669,7 +723,7 @@ func (s *Service) handleResponseDone(ctx context.Context, session *VoiceSession,
 
 	// Check if session still exists in activeSessions
 	if _, exists := s.activeSessions.Load(session.GuildID); !exists {
-		s.logger.Debug("Session no longer active, skipping response processing", 
+		s.logger.Debug("Session no longer active, skipping response processing",
 			zap.String("guild_id", session.GuildID.String()))
 		return
 	}
@@ -677,7 +731,7 @@ func (s *Service) handleResponseDone(ctx context.Context, session *VoiceSession,
 	// Update token usage
 	err := s.sessionManager.UpdateTokenUsage(session.GuildID, usage.InputAudioTokens, usage.OutputAudioTokens)
 	if err != nil {
-		s.logger.Debug("Failed to update token usage", zap.Error(err), 
+		s.logger.Debug("Failed to update token usage", zap.Error(err),
 			zap.String("guild_id", session.GuildID.String()))
 		return // Session was likely cleaned up
 	}
@@ -690,7 +744,7 @@ func (s *Service) handleResponseDone(ctx context.Context, session *VoiceSession,
 		// Update session cost
 		err = s.sessionManager.UpdateSessionCost(session.GuildID, cost)
 		if err != nil {
-			s.logger.Debug("Failed to update session cost", zap.Error(err), 
+			s.logger.Debug("Failed to update session cost", zap.Error(err),
 				zap.String("guild_id", session.GuildID.String()))
 			return // Session was likely cleaned up
 		}
@@ -731,7 +785,7 @@ func (s *Service) checkCostLimits(ctx context.Context, session *VoiceSession, co
 			zap.Float64("cost", cost),
 			zap.Int("input_tokens", session.InputAudioTokens),
 			zap.Int("output_tokens", session.OutputAudioTokens))
-		
+
 		// Update the last cost update time so we don't spam logs
 		session.LastCostUpdate = time.Now()
 	}
@@ -820,4 +874,88 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	})
 
 	return nil
+}
+
+// saveDebugWAV saves PCM audio as a WAV file for debugging
+func (s *Service) saveDebugWAV(pcmData []byte, guildID discord.GuildID, prefix string) error {
+	// Create debug directory if it doesn't exist
+	debugDir := "debug_audio"
+	if err := os.MkdirAll(debugDir, 0755); err != nil {
+		return fmt.Errorf("failed to create debug directory: %w", err)
+	}
+
+	// Generate filename with timestamp
+	timestamp := time.Now().Format("20060102_150405")
+	filename := filepath.Join(debugDir, fmt.Sprintf("%s_audio_%s_%s.wav", prefix, guildID.String(), timestamp))
+
+	// Create WAV file
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("failed to create WAV file: %w", err)
+	}
+	defer file.Close()
+
+	// WAV file format: 24kHz, mono, 16-bit PCM
+	const (
+		numChannels   = 1
+		sampleRate    = 24000
+		bitsPerSample = 16
+		byteRate      = sampleRate * numChannels * bitsPerSample / 8
+		blockAlign    = numChannels * bitsPerSample / 8
+	)
+
+	// Calculate sizes
+	dataSize := uint32(len(pcmData))
+	fileSize := dataSize + 36 // 36 = header size without data chunk size
+
+	// Write RIFF header
+	file.Write([]byte("RIFF"))
+	binary.Write(file, binary.LittleEndian, fileSize)
+	file.Write([]byte("WAVE"))
+
+	// Write fmt chunk
+	file.Write([]byte("fmt "))
+	binary.Write(file, binary.LittleEndian, uint32(16)) // fmt chunk size
+	binary.Write(file, binary.LittleEndian, uint16(1))  // PCM format
+	binary.Write(file, binary.LittleEndian, uint16(numChannels))
+	binary.Write(file, binary.LittleEndian, uint32(sampleRate))
+	binary.Write(file, binary.LittleEndian, uint32(byteRate))
+	binary.Write(file, binary.LittleEndian, uint16(blockAlign))
+	binary.Write(file, binary.LittleEndian, uint16(bitsPerSample))
+
+	// Write data chunk
+	file.Write([]byte("data"))
+	binary.Write(file, binary.LittleEndian, dataSize)
+	file.Write(pcmData)
+
+	s.logger.Info("Saved debug WAV file",
+		zap.String("filename", filename),
+		zap.Int("size_bytes", len(pcmData)),
+		zap.Float64("duration_seconds", float64(len(pcmData))/float64(byteRate)))
+
+	return nil
+}
+
+// saveUserBuffersDebug saves individual user audio buffers for debugging
+func (s *Service) saveUserBuffersDebug(guildID discord.GuildID) {
+	// Use the public interface to get active users
+	activeUsers := s.audioMixer.GetActiveUsersForDebug()
+
+	for _, userID := range activeUsers {
+		// Get the last 2 seconds of audio for this user using public interface
+		audioData := s.audioMixer.GetUserAudioForDebug(userID, 2*time.Second)
+
+		if len(audioData) > 0 {
+			// Save user's audio
+			if err := s.saveDebugWAV(audioData, guildID, fmt.Sprintf("user_%s", userID.String())); err != nil {
+				s.logger.Error("Failed to save user audio WAV",
+					zap.String("user_id", userID.String()),
+					zap.Error(err))
+			} else {
+				s.logger.Debug("Saved user audio buffer",
+					zap.String("user_id", userID.String()),
+					zap.Int("audio_size", len(audioData)))
+			}
+		}
+	}
 }

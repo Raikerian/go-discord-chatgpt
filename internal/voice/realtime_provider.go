@@ -309,7 +309,7 @@ func (p *openAIRealtimeProvider) handleServerEvent(ctx context.Context, event op
 	case openairt.ServerEventTypeResponseAudioTranscriptDone:
 		transcript := event.(openairt.ResponseAudioTranscriptDoneEvent)
 		if p.handlers.OnTranscript != nil {
-			p.logger.Info("Received AI transcript from OpenAI",
+			p.logger.Debug("Received AI transcript from OpenAI",
 				zap.String("transcript", transcript.Transcript))
 			p.handlers.OnTranscript(ctx, transcript.Transcript)
 		}
@@ -317,7 +317,7 @@ func (p *openAIRealtimeProvider) handleServerEvent(ctx context.Context, event op
 	case openairt.ServerEventTypeConversationItemInputAudioTranscriptionCompleted:
 		inputTranscript := event.(openairt.ConversationItemInputAudioTranscriptionCompletedEvent)
 		if p.handlers.OnUserTranscript != nil {
-			p.logger.Info("Received user transcript from OpenAI",
+			p.logger.Debug("Received user transcript from OpenAI",
 				zap.String("transcript", inputTranscript.Transcript),
 				zap.String("item_id", inputTranscript.ItemID))
 			p.handlers.OnUserTranscript(ctx, inputTranscript.Transcript)

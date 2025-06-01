@@ -431,7 +431,7 @@ func (p *audioProcessor) calculateRMSEnergy(audio []byte) float32 {
 
 	for i := 0; i < len(audio)-1; i += 2 {
 		// Convert little-endian 16-bit samples to float
-		sample := int16(audio[i]) | (int16(audio[i+1]) << 8)
+		sample := int16(uint16(audio[i]) | (uint16(audio[i+1]) << 8))
 		sampleFloat := float64(sample) / 32768.0 // Normalize to [-1, 1]
 		sum += sampleFloat * sampleFloat
 	}
@@ -593,7 +593,7 @@ func (p *audioProcessor) bytesToInt16(bytes []byte) []int16 {
 	samples := make([]int16, sampleCount)
 
 	for i := range sampleCount {
-		samples[i] = int16(bytes[i*2]) | (int16(bytes[i*2+1]) << 8)
+		samples[i] = int16(uint16(bytes[i*2]) | (uint16(bytes[i*2+1]) << 8))
 	}
 
 	return samples

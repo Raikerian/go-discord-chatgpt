@@ -34,10 +34,12 @@ type VoiceConnection struct {
 }
 
 type AudioPacket struct {
-	UserID    discord.UserID
-	SSRC      uint32
-	Opus      []byte
-	Timestamp time.Time
+	UserID       discord.UserID
+	SSRC         uint32
+	Opus         []byte
+	Timestamp    time.Time // Wall clock time when received
+	RTPTimestamp uint32    // RTP timestamp from packet
+	Sequence     uint16    // RTP sequence number
 }
 
 type discordVoiceManager struct {
@@ -221,6 +223,8 @@ func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID disc
 				m.logger.Debug("Received audio packet",
 					zap.Uint32("ssrc", ssrc),
 					zap.Int("opus_length", len(packet.Opus)),
+					zap.Uint32("rtp_timestamp", packet.Timestamp()),
+					zap.Uint16("sequence", packet.Sequence()),
 					zap.String("channel_id", channelID.String()))
 
 				// For now, we'll process all packets with a placeholder user ID
@@ -229,10 +233,12 @@ func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID disc
 
 				// Convert arikawa voice packet to our AudioPacket format
 				audioPacket := &AudioPacket{
-					UserID:    userID,
-					SSRC:      packet.SSRC(),
-					Opus:      packet.Opus,
-					Timestamp: time.Now(),
+					UserID:       userID,
+					SSRC:         packet.SSRC(),
+					Opus:         packet.Opus,
+					Timestamp:    time.Now(),
+					RTPTimestamp: packet.Timestamp(),
+					Sequence:     packet.Sequence(),
 				}
 
 				// Send packet to channel (non-blocking)

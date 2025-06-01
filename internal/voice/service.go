@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -413,83 +412,24 @@ func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
 		zap.Duration("actual_duration", actualDuration),
 		zap.Int("audio_bytes", len(mixedAudio)))
 
-	// Perform Voice Activity Detection (VAD) with better algorithm
-	isSilent, energyLevel := s.detectVoiceActivity(mixedAudio)
+	// use DetectSilence from audio processor
+	// // Perform Voice Activity Detection (VAD) with better algorithm
+	// isSilent, energyLevel := s.detectVoiceActivity(mixedAudio)
 
-	if isSilent {
-		s.logger.Debug("Audio is mostly silence, skipping",
-			zap.Float32("energy_level", energyLevel),
-			zap.Duration("duration", actualDuration))
-		return
-	}
+	// if isSilent {
+	// 	s.logger.Debug("Audio is mostly silence, skipping",
+	// 		zap.Float32("energy_level", energyLevel),
+	// 		zap.Duration("duration", actualDuration))
+	// 	return
+	// }
 
 	s.logger.Debug("Mixed audio obtained",
 		zap.Int("size", len(mixedAudio)),
-		zap.Float32("energy_level", energyLevel),
+		// zap.Float32("energy_level", energyLevel),
 		zap.Duration("actual_duration", actualDuration))
 
 	// Continue with the rest of the processing
 	s.processMixedAudio(ctx, session, mixedAudio)
-}
-
-// detectVoiceActivity performs Voice Activity Detection on the mixed audio
-func (s *Service) detectVoiceActivity(audio []byte) (isSilent bool, energyLevel float32) {
-	if len(audio) < 2 {
-		return true, 0.0
-	}
-
-	// Calculate RMS energy
-	var sum float64
-	sampleCount := len(audio) / 2
-	peakAmplitude := int16(0)
-
-	for i := 0; i < len(audio)-1; i += 2 {
-		sample := int16(uint16(audio[i]) | (uint16(audio[i+1]) << 8))
-
-		// Track peak for additional analysis
-		absSample := sample
-		if absSample < 0 {
-			absSample = -absSample
-		}
-		if absSample > peakAmplitude {
-			peakAmplitude = absSample
-		}
-
-		sampleFloat := float64(sample) / 32768.0
-		sum += sampleFloat * sampleFloat
-	}
-
-	if sampleCount == 0 {
-		return true, 0.0
-	}
-
-	rms := math.Sqrt(sum / float64(sampleCount))
-	energyLevel = float32(rms)
-
-	// Dynamic threshold based on content
-	// Human speech typically has RMS values between 0.01 and 0.3
-	const (
-		silenceThreshold = 0.008 // Below this is definitely silence
-		speechThreshold  = 0.015 // Above this likely contains speech
-	)
-
-	// Additional check: if peak amplitude is very low, it's likely silence
-	peakNormalized := float32(peakAmplitude) / 32768.0
-	if peakNormalized < 0.01 {
-		return true, energyLevel
-	}
-
-	// Use RMS for primary detection
-	isSilent = energyLevel < silenceThreshold
-
-	// If we're in the ambiguous zone, check for speech patterns
-	if energyLevel >= silenceThreshold && energyLevel < speechThreshold {
-		// Could implement zero-crossing rate or other features here
-		// For now, we'll be conservative and process borderline audio
-		isSilent = false
-	}
-
-	return isSilent, energyLevel
 }
 
 func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, mixedAudio []byte) {
@@ -499,7 +439,7 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 
 	// DEBUG: Save audio to WAV files for debugging
 	// Set this to true to enable WAV file saving
-	const debugSaveWAV = false
+	const debugSaveWAV = true
 	if debugSaveWAV {
 		// Save what each user has in the mixer
 		s.saveUserBuffersDebug(session.GuildID)

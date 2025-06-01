@@ -216,28 +216,6 @@ func (j *jitterBuffer) insert(packet *audioPacketData) {
 	}
 }
 
-func (j *jitterBuffer) getPacketsInRange(startRTP, endRTP uint32) []*audioPacketData {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	
-	var result []*audioPacketData
-	for _, packet := range j.packets {
-		if packet.rtpTimestamp >= startRTP && packet.rtpTimestamp < endRTP {
-			result = append(result, packet)
-		}
-	}
-	
-	// Sort by RTP timestamp
-	for i := range len(result) - 1 {
-		for j := i + 1; j < len(result); j++ {
-			if result[i].rtpTimestamp > result[j].rtpTimestamp {
-				result[i], result[j] = result[j], result[i]
-			}
-		}
-	}
-	
-	return result
-}
 
 
 func (s *streamSynchronizer) calculateOffset(userID discord.UserID, rtpTimestamp uint32, arrivalTime time.Time) {
@@ -342,60 +320,75 @@ func (m *audioMixer) getUserAudioAligned(stream *userStream, duration time.Durat
 	expectedSamples := int(duration.Nanoseconds() * int64(m.sampleRate) / int64(time.Second))
 	expectedBytes := expectedSamples * 2 // 16-bit samples
 	
-	// Calculate RTP range for this duration
-	// For Discord: 960 RTP units = 20ms at 48kHz
-	// For us: 480 samples = 20ms at 24kHz
-	
-	// Get the most recent RTP timestamp
-	if stream.lastRTPTimestamp == 0 {
-		return make([]byte, expectedBytes)
+	// Simple approach: get all packets from jitter buffer and concatenate them
+	// then trim/pad to the expected size
+	stream.jitterBuffer.mu.Lock()
+	packets := make([]*audioPacketData, 0, len(stream.jitterBuffer.packets))
+	for _, packet := range stream.jitterBuffer.packets {
+		packets = append(packets, packet)
 	}
+	stream.jitterBuffer.mu.Unlock()
 	
-	// Calculate RTP range based on duration
-	// 48 RTP units per millisecond at 48kHz
-	rtpDuration := uint32(duration.Milliseconds() * 48)
-	endRTP := stream.lastRTPTimestamp
-	startRTP := endRTP - rtpDuration
-	
-	// Get packets from jitter buffer
-	packets := stream.jitterBuffer.getPacketsInRange(startRTP, endRTP)
+	m.logger.Debug("Retrieved ALL packets from jitter buffer",
+		zap.String("user_id", stream.userID.String()),
+		zap.Int("total_packets", len(packets)),
+		zap.Duration("requested_duration", duration),
+		zap.Int("expected_bytes", expectedBytes))
 	
 	if len(packets) == 0 {
+		m.logger.Debug("No packets in buffer, returning silence",
+			zap.String("user_id", stream.userID.String()))
 		return make([]byte, expectedBytes)
 	}
 	
-	// Build continuous audio from packets
-	result := make([]byte, 0, expectedBytes)
-	currentRTP := startRTP
-	const rtpIncrement = 960 // 20ms at 48kHz
-	
-	// Create a map for quick packet lookup
-	packetMap := make(map[uint32]*audioPacketData)
-	for _, packet := range packets {
-		packetMap[packet.rtpTimestamp] = packet
-	}
-	
-	for currentRTP < endRTP {
-		if packet, exists := packetMap[currentRTP]; exists {
-			// Found audio for this timestamp
-			result = append(result, packet.audio...)
-		} else {
-			// Missing packet - insert silence
-			// 20ms at 24kHz = 480 samples = 960 bytes
-			silence := make([]byte, 960)
-			result = append(result, silence...)
+	// Sort packets by RTP timestamp
+	for i := range len(packets) - 1 {
+		for j := i + 1; j < len(packets); j++ {
+			if packets[i].rtpTimestamp > packets[j].rtpTimestamp {
+				packets[i], packets[j] = packets[j], packets[i]
+			}
 		}
-		currentRTP += rtpIncrement
 	}
 	
-	// Ensure correct size
+	// Concatenate all audio data
+	result := make([]byte, 0, expectedBytes)
+	totalAudioBytes := 0
+	packetsUsed := 0
+	
+	for _, packet := range packets {
+		if len(packet.audio) > 0 {
+			result = append(result, packet.audio...)
+			totalAudioBytes += len(packet.audio)
+			packetsUsed++
+			
+			m.logger.Debug("Added packet audio",
+				zap.String("user_id", stream.userID.String()),
+				zap.Uint32("rtp_timestamp", packet.rtpTimestamp),
+				zap.Int("audio_bytes", len(packet.audio)),
+				zap.Int("total_so_far", len(result)))
+		}
+	}
+	
+	m.logger.Debug("Audio concatenation complete",
+		zap.String("user_id", stream.userID.String()),
+		zap.Int("packets_used", packetsUsed),
+		zap.Int("total_audio_bytes", totalAudioBytes),
+		zap.Int("result_bytes", len(result)))
+	
+	// Adjust to expected size
 	if len(result) < expectedBytes {
-		// Pad with silence
+		// Pad with silence at the end
 		padding := make([]byte, expectedBytes-len(result))
 		result = append(result, padding...)
+		m.logger.Debug("Padded with silence",
+			zap.String("user_id", stream.userID.String()),
+			zap.Int("padding_bytes", len(padding)))
 	} else if len(result) > expectedBytes {
-		// Keep most recent audio
+		// Keep the most recent audio (end of the buffer)
 		result = result[len(result)-expectedBytes:]
+		m.logger.Debug("Trimmed to expected size",
+			zap.String("user_id", stream.userID.String()),
+			zap.Int("trimmed_bytes", len(result)-expectedBytes))
 	}
 	
 	return result
@@ -565,7 +558,7 @@ func (m *audioMixer) GetAllAvailableMixedAudioAndFlush() ([]byte, time.Duration,
 // bytesToFloat32 converts 16-bit PCM to normalized float32
 func (m *audioMixer) bytesToFloat32(audio []byte) []float32 {
 	samples := make([]float32, len(audio)/2)
-	for i := 0; i < len(audio)-1; i += 2 {
+	for i := 0; i+1 < len(audio); i += 2 {
 		sample := int16(uint16(audio[i]) | (uint16(audio[i+1]) << 8))
 		samples[i/2] = float32(sample) / 32768.0
 	}

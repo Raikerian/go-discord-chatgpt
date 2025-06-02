@@ -7,11 +7,11 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/chat"
-	pkgopenai "github.com/Raikerian/go-discord-chatgpt/pkg/openai"
+	"github.com/Raikerian/go-discord-chatgpt/pkg/test"
 )
 
 func TestOpenAIUsageFormatter_FormatUsage_StandardCase(t *testing.T) {
-	mockPricing := pkgopenai.NewMockPricingService(t)
+	mockPricing := test.NewMockPricingService(t)
 
 	formatter := chat.NewOpenAIUsageFormatter(mockPricing)
 
@@ -33,7 +33,7 @@ func TestOpenAIUsageFormatter_FormatUsage_StandardCase(t *testing.T) {
 }
 
 func TestOpenAIUsageFormatter_FormatUsage_WithCachedTokens(t *testing.T) {
-	mockPricing := pkgopenai.NewMockPricingService(t)
+	mockPricing := test.NewMockPricingService(t)
 
 	formatter := chat.NewOpenAIUsageFormatter(mockPricing)
 
@@ -59,7 +59,7 @@ func TestOpenAIUsageFormatter_FormatUsage_WithCachedTokens(t *testing.T) {
 }
 
 func TestOpenAIUsageFormatter_FormatUsage_CostCalculationError(t *testing.T) {
-	mockPricing := pkgopenai.NewMockPricingService(t)
+	mockPricing := test.NewMockPricingService(t)
 
 	formatter := chat.NewOpenAIUsageFormatter(mockPricing)
 

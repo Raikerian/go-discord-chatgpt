@@ -9,16 +9,17 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/commands"
+	"github.com/Raikerian/go-discord-chatgpt/pkg/test"
 )
 
 func TestNewCommandManager(t *testing.T) {
 	appID := discord.AppID(12345)
 
 	t.Run("SuccessWithUniqueCommands", func(t *testing.T) {
-		mockCmd1 := commands.NewMockCommand(t)
+		mockCmd1 := test.NewMockCommand(t)
 		mockCmd1.On("Name").Return("ping")
 
-		mockCmd2 := commands.NewMockCommand(t)
+		mockCmd2 := test.NewMockCommand(t)
 		mockCmd2.On("Name").Return("help")
 
 		params := commands.CommandManagerParams{
@@ -57,7 +58,7 @@ func TestNewCommandManager(t *testing.T) {
 	})
 
 	t.Run("NilCommandInSlice", func(t *testing.T) {
-		mockCmd1 := commands.NewMockCommand(t)
+		mockCmd1 := test.NewMockCommand(t)
 		mockCmd1.On("Name").Return("valid")
 
 		params := commands.CommandManagerParams{
@@ -78,13 +79,13 @@ func TestNewCommandManager(t *testing.T) {
 	})
 
 	t.Run("DuplicateCommandNames", func(t *testing.T) {
-		mockCmd1a := commands.NewMockCommand(t)
+		mockCmd1a := test.NewMockCommand(t)
 		mockCmd1a.On("Name").Return("dup")
 
-		mockCmd1b := commands.NewMockCommand(t)
+		mockCmd1b := test.NewMockCommand(t)
 		mockCmd1b.On("Name").Return("dup") // CommandManager logs a warning but takes the first one.
 
-		mockCmd2 := commands.NewMockCommand(t)
+		mockCmd2 := test.NewMockCommand(t)
 		mockCmd2.On("Name").Return("unique")
 
 		params := commands.CommandManagerParams{
@@ -107,7 +108,7 @@ func TestNewCommandManager(t *testing.T) {
 	})
 
 	t.Run("NilLogger", func(t *testing.T) {
-		mockCmd1 := commands.NewMockCommand(t)
+		mockCmd1 := test.NewMockCommand(t)
 		mockCmd1.On("Name").Return("testlog")
 
 		params := commands.CommandManagerParams{

@@ -1,20 +1,14 @@
-all: false
-dir: '{{.InterfaceDir}}'
-filename: mocks_test.go
-force-file-write: true
-formatter: goimports
-log-level: info
+dir: pkg/test
+filename: "mock_{{.InterfaceName | snakecase}}.go"
 structname: '{{.Mock}}{{.InterfaceName}}'
-pkgname: '{{.SrcPackageName}}'
-recursive: false
-require-template-schema-exists: true
-template: testify
-template-schema: '{{.Template}}.schema.json'
+pkgname: test
 packages:
   github.com/Raikerian/go-discord-chatgpt/internal/commands:
-    config:
-      all: true
+    interfaces:
+      Command:
   github.com/Raikerian/go-discord-chatgpt/pkg/openai:
-    config:
-      all: true
-
+    interfaces:
+      PricingService:
+  github.com/Raikerian/go-discord-chatgpt/internal/voice:
+    interfaces:
+      AudioMixer:

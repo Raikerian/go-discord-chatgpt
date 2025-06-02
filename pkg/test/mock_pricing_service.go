@@ -2,9 +2,10 @@
 // github.com/vektra/mockery
 // template: testify
 
-package openai
+package test
 
 import (
+	"github.com/Raikerian/go-discord-chatgpt/pkg/openai"
 	mock "github.com/stretchr/testify/mock"
 )
 
@@ -305,23 +306,23 @@ func (_c *MockPricingService_GetContextSize_Call) RunAndReturn(run func(modelNam
 }
 
 // GetModelPricing provides a mock function for the type MockPricingService
-func (_mock *MockPricingService) GetModelPricing(modelName string) (*ModelInfo, error) {
+func (_mock *MockPricingService) GetModelPricing(modelName string) (*openai.ModelInfo, error) {
 	ret := _mock.Called(modelName)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetModelPricing")
 	}
 
-	var r0 *ModelInfo
+	var r0 *openai.ModelInfo
 	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(string) (*ModelInfo, error)); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) (*openai.ModelInfo, error)); ok {
 		return returnFunc(modelName)
 	}
-	if returnFunc, ok := ret.Get(0).(func(string) *ModelInfo); ok {
+	if returnFunc, ok := ret.Get(0).(func(string) *openai.ModelInfo); ok {
 		r0 = returnFunc(modelName)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*ModelInfo)
+			r0 = ret.Get(0).(*openai.ModelInfo)
 		}
 	}
 	if returnFunc, ok := ret.Get(1).(func(string) error); ok {
@@ -350,30 +351,30 @@ func (_c *MockPricingService_GetModelPricing_Call) Run(run func(modelName string
 	return _c
 }
 
-func (_c *MockPricingService_GetModelPricing_Call) Return(modelInfo *ModelInfo, err error) *MockPricingService_GetModelPricing_Call {
+func (_c *MockPricingService_GetModelPricing_Call) Return(modelInfo *openai.ModelInfo, err error) *MockPricingService_GetModelPricing_Call {
 	_c.Call.Return(modelInfo, err)
 	return _c
 }
 
-func (_c *MockPricingService_GetModelPricing_Call) RunAndReturn(run func(modelName string) (*ModelInfo, error)) *MockPricingService_GetModelPricing_Call {
+func (_c *MockPricingService_GetModelPricing_Call) RunAndReturn(run func(modelName string) (*openai.ModelInfo, error)) *MockPricingService_GetModelPricing_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // GetPricingData provides a mock function for the type MockPricingService
-func (_mock *MockPricingService) GetPricingData() *PricingData {
+func (_mock *MockPricingService) GetPricingData() *openai.PricingData {
 	ret := _mock.Called()
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetPricingData")
 	}
 
-	var r0 *PricingData
-	if returnFunc, ok := ret.Get(0).(func() *PricingData); ok {
+	var r0 *openai.PricingData
+	if returnFunc, ok := ret.Get(0).(func() *openai.PricingData); ok {
 		r0 = returnFunc()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*PricingData)
+			r0 = ret.Get(0).(*openai.PricingData)
 		}
 	}
 	return r0
@@ -396,12 +397,12 @@ func (_c *MockPricingService_GetPricingData_Call) Run(run func()) *MockPricingSe
 	return _c
 }
 
-func (_c *MockPricingService_GetPricingData_Call) Return(pricingData *PricingData) *MockPricingService_GetPricingData_Call {
+func (_c *MockPricingService_GetPricingData_Call) Return(pricingData *openai.PricingData) *MockPricingService_GetPricingData_Call {
 	_c.Call.Return(pricingData)
 	return _c
 }
 
-func (_c *MockPricingService_GetPricingData_Call) RunAndReturn(run func() *PricingData) *MockPricingService_GetPricingData_Call {
+func (_c *MockPricingService_GetPricingData_Call) RunAndReturn(run func() *openai.PricingData) *MockPricingService_GetPricingData_Call {
 	_c.Call.Return(run)
 	return _c
 }

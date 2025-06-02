@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
@@ -100,6 +101,7 @@ type audioProcessor struct {
 	cfg             *config.VoiceConfig
 	silenceDetector *SilenceDetector
 	currentQuality  AudioConfig
+	closed          bool
 
 	// Opus codecs
 	opusDecoder *gopus.Decoder
@@ -163,6 +165,7 @@ func NewAudioProcessor(logger *zap.Logger, cfg *config.Config) (AudioProcessor, 
 	// Configure encoder settings optimized for speech
 	opusEncoder.SetBitrate(currentQuality.Bitrate)
 	opusEncoder.SetApplication(gopus.Voip)
+	// Note: gopus library doesn't expose SetComplexity method
 
 	processor := &audioProcessor{
 		logger:          logger,
@@ -187,6 +190,10 @@ func (p *audioProcessor) OpusToPCM(opusData []byte) ([]byte, error) {
 	}
 
 	p.mu.RLock()
+	if p.closed {
+		p.mu.RUnlock()
+		return nil, fmt.Errorf("audio processor is closed")
+	}
 	decoder := p.opusDecoder
 	p.mu.RUnlock()
 
@@ -194,6 +201,14 @@ func (p *audioProcessor) OpusToPCM(opusData []byte) ([]byte, error) {
 	pcm48Stereo, err := decoder.Decode(opusData, DiscordFrameSize, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode opus data: %w", err)
+	}
+	
+	// Validate that decoder returns expected size
+	expectedSamples := DiscordFrameSize * DiscordChannels
+	if len(pcm48Stereo) != expectedSamples {
+		p.logger.Warn("Unexpected decode size",
+			zap.Int("expected", expectedSamples),
+			zap.Int("actual", len(pcm48Stereo)))
 	}
 
 	// Convert to mono and resample to 24kHz for OpenAI
@@ -396,6 +411,7 @@ func (p *audioProcessor) ConfigureQuality(quality string) error {
 	// Update encoder settings with speech optimization
 	p.opusEncoder.SetBitrate(preset.Bitrate)
 	p.opusEncoder.SetApplication(gopus.Voip)
+	// Note: gopus library doesn't expose SetComplexity method
 
 	p.logger.Info("Audio quality configured",
 		zap.String("quality", quality),
@@ -410,6 +426,11 @@ func (p *audioProcessor) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.closed {
+		return nil
+	}
+
+	p.closed = true
 	// gopus doesn't require explicit cleanup
 	p.opusDecoder = nil
 	p.opusEncoder = nil
@@ -449,20 +470,14 @@ func (p *audioProcessor) updateAdaptiveThreshold() {
 	sorted := make([]float32, len(p.silenceDetector.energyBuffer))
 	copy(sorted, p.silenceDetector.energyBuffer)
 
-	// Sort using a more efficient algorithm for small slices
-	for i := range len(sorted) - 1 {
-		for j := range len(sorted) - i - 1 {
-			if sorted[j] > sorted[j+1] {
-				sorted[j], sorted[j+1] = sorted[j+1], sorted[j]
-			}
-		}
-	}
+	// Sort using efficient standard library sort
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 
 	// Take average of lowest 10% (more conservative than 25%)
 	bottomPercentile := max(1, len(sorted)/10)
 
 	var sum float32
-	for i := range bottomPercentile {
+	for i := 0; i < bottomPercentile; i++ {
 		sum += sorted[i]
 	}
 
@@ -478,8 +493,8 @@ func (p *audioProcessor) updateAdaptiveThreshold() {
 	alpha := float32(0.05) // Even more conservative smoothing
 	p.silenceDetector.threshold = alpha*newThreshold + (1-alpha)*p.silenceDetector.threshold
 
-	// Ensure threshold never goes below minimum
-	p.silenceDetector.threshold = max(MinimumThreshold, p.silenceDetector.threshold)
+	// Ensure threshold is within bounds
+	p.silenceDetector.threshold = max(MinimumThreshold, min(MaximumThreshold, p.silenceDetector.threshold))
 
 	// Update noise floor for reference
 	p.silenceDetector.noiseFloor = estimatedNoiseFloor
@@ -508,8 +523,8 @@ func (p *audioProcessor) resampleStereoToMono(stereoSamples []int16) []int16 {
 		}
 	}
 
-	// Apply the original working filter for input path (Discord -> OpenAI)
-	// This second-order Butterworth filter was working correctly before
+	// Apply basic anti-aliasing: simple averaging filter for downsampling
+	// For better quality, a proper Butterworth low-pass filter could be implemented here
 	filtered := monoSamples
 
 	// Use linear interpolation for downsampling from 48kHz to 24kHz (2:1 ratio)
@@ -517,7 +532,7 @@ func (p *audioProcessor) resampleStereoToMono(stereoSamples []int16) []int16 {
 	outputSize := len(filtered) / 2
 	output := make([]int16, outputSize)
 
-	for i := range outputSize {
+	for i := 0; i < outputSize; i++ {
 		srcIndex := i * 2
 		if srcIndex < len(filtered) {
 			// For 2:1 downsampling, we can use simple averaging of adjacent samples
@@ -592,7 +607,7 @@ func (p *audioProcessor) bytesToInt16(bytes []byte) []int16 {
 	sampleCount := len(bytes) / 2
 	samples := make([]int16, sampleCount)
 
-	for i := range sampleCount {
+	for i := 0; i < sampleCount; i++ {
 		samples[i] = int16(uint16(bytes[i*2]) | (uint16(bytes[i*2+1]) << 8))
 	}
 
@@ -615,7 +630,7 @@ func (p *audioProcessor) validatePCMFormat(pcm []byte) error {
 
 	// For 24kHz mono, check if the duration is reasonable
 	// Most audio chunks should be between 10ms and 5 seconds
-	durationMs := float64(numSamples) / 24.0 // samples / (24000 samples/sec) * 1000 ms/sec
+	durationMs := float64(numSamples) / 24000.0 * 1000.0 // samples / (24000 samples/sec) * 1000 ms/sec
 
 	if durationMs < 10.0 {
 		p.logger.Warn("Very short audio chunk detected",

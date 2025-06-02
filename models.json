@@ -129,7 +129,9 @@
       "pricing": {
         "input_per_million": 5.00,
         "cached_per_million": 2.50,
-        "output_per_million": 20.00
+        "output_per_million": 20.00,
+        "audio_input_per_million": 40.00,
+        "audio_output_per_million": 80.00
       },
       "context_size": 128000
     },
@@ -139,7 +141,9 @@
       "pricing": {
         "input_per_million": 5.00,
         "cached_per_million": 2.50,
-        "output_per_million": 20.00
+        "output_per_million": 20.00,
+        "audio_input_per_million": 40.00,
+        "audio_output_per_million": 80.00
       },
       "context_size": 128000
     },
@@ -189,7 +193,9 @@
       "pricing": {
         "input_per_million": 0.60,
         "cached_per_million": 0.30,
-        "output_per_million": 2.40
+        "output_per_million": 2.40,
+        "audio_input_per_million": 10.00,
+        "audio_output_per_million": 20.00
       },
       "context_size": 128000
     },
@@ -199,7 +205,9 @@
       "pricing": {
         "input_per_million": 0.60,
         "cached_per_million": 0.30,
-        "output_per_million": 2.40
+        "output_per_million": 2.40,
+        "audio_input_per_million": 10.00,
+        "audio_output_per_million": 20.00
       },
       "context_size": 128000
     },

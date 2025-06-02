@@ -410,18 +410,17 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 		zap.Uint32("rtp_timestamp", packet.RTPTimestamp),
 		zap.Uint16("sequence", packet.Sequence))
 
-	// pcm, err := s.audioProcessor.OpusToPCM(packet.Opus)
-	// if err != nil {
-	// 	s.logger.Debug("Failed to convert Opus to PCM",
-	// 		zap.Error(err),
-	// 		zap.String("user_id", packet.UserID.String()))
+	pcm, err := s.audioProcessor.OpusToPCM(packet.Opus)
+	if err != nil {
+		s.logger.Debug("Failed to convert Opus to PCM",
+			zap.Error(err),
+			zap.String("user_id", packet.UserID.String()))
 
-	// 	return
-	// }
+		return
+	}
 
-	// Add all audio to mixer without silence detection
-	// Use the RTP-aware method to track timing properly
-	s.audioMixer.AddUserAudioWithRTP(packet.UserID, packet.Opus, packet.Timestamp, packet.RTPTimestamp, packet.Sequence)
+	// Add PCM audio to mixer with RTP timing info
+	s.audioMixer.AddUserAudioWithRTP(packet.UserID, pcm, packet.Timestamp, packet.RTPTimestamp, packet.Sequence)
 	s.sessionManager.UpdateActivity(session.GuildID)
 	s.sessionManager.UpdateAudioTime(session.GuildID)
 
@@ -436,7 +435,7 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 
 	s.logger.Debug("Added audio to mixer",
 		zap.String("user_id", packet.UserID.String()),
-		zap.Int("pcm_length", len(packet.Opus)),
+		zap.Int("pcm_length", len(pcm)),
 		zap.Time("timestamp", packet.Timestamp),
 		zap.Uint32("rtp_timestamp", packet.RTPTimestamp))
 }

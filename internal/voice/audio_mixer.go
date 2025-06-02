@@ -6,9 +6,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/diamondburned/arikawa/v3/discord"
 	"go.uber.org/zap"
+
+	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 )
 
 type AudioMixer interface {
@@ -36,7 +37,7 @@ type AudioMixer interface {
 	GetDominantSpeaker() (discord.UserID, float32) // returns userID, confidence
 }
 
-// audioPacket represents a single audio packet with metadata
+// audioPacket represents a single audio packet with metadata.
 type audioPacket struct {
 	audio        []byte
 	timestamp    time.Time
@@ -44,16 +45,16 @@ type audioPacket struct {
 	sequence     uint16
 }
 
-// userStream represents a user's audio stream
+// userStream represents a user's audio stream.
 type userStream struct {
-	mu           sync.RWMutex
-	userID       discord.UserID
-	packets      map[uint16]*audioPacket // sequence -> packet
-	lastUpdate   time.Time
-	energyLevel  float32
-	rtpBase      uint32 // Base RTP timestamp for unwrapping
-	rtpHighBits  uint32 // High bits for RTP unwrapping
-	
+	mu          sync.RWMutex
+	userID      discord.UserID
+	packets     map[uint16]*audioPacket // sequence -> packet
+	lastUpdate  time.Time
+	energyLevel float32
+	rtpBase     uint32 // Base RTP timestamp for unwrapping
+	rtpHighBits uint32 // High bits for RTP unwrapping
+
 	// Track cumulative energy for dominant speaker detection
 	cumulativeEnergy float64
 	packetCount      int
@@ -67,13 +68,13 @@ type audioMixer struct {
 	frameSize  int
 
 	// Performance tracking
-	perfMu      sync.RWMutex
-	avgMixTime  time.Duration
+	perfMu       sync.RWMutex
+	avgMixTime   time.Duration
 	fallbackMode bool
 }
 
 const (
-	maxJitterBufferSize = 500  // Maximum packets in jitter buffer
+	maxJitterBufferSize = 500 // Maximum packets in jitter buffer
 	maxBufferAge        = 10 * time.Second
 )
 
@@ -93,10 +94,10 @@ func (m *audioMixer) AddUserAudioWithRTP(userID discord.UserID, audio []byte, ti
 
 	// Get or create user stream
 	streamInt, _ := m.streams.LoadOrStore(userID, &userStream{
-		userID:  userID,
-		packets: make(map[uint16]*audioPacket),
+		userID:           userID,
+		packets:          make(map[uint16]*audioPacket),
 		cumulativeEnergy: 0,
-		packetCount: 0,
+		packetCount:      0,
 	})
 	stream := streamInt.(*userStream)
 
@@ -106,7 +107,7 @@ func (m *audioMixer) AddUserAudioWithRTP(userID discord.UserID, audio []byte, ti
 	// Update metadata
 	stream.lastUpdate = timestamp
 	stream.energyLevel = m.calculateRMS(audio)
-	
+
 	// Update cumulative energy tracking
 	stream.cumulativeEnergy += float64(stream.energyLevel)
 	stream.packetCount++
@@ -229,6 +230,7 @@ func (m *audioMixer) getActiveStreams() []*userStream {
 		if hasPackets && isRecent {
 			streams = append(streams, stream)
 		}
+
 		return true
 	})
 
@@ -256,18 +258,19 @@ func (m *audioMixer) extractUserAudio(stream *userStream, duration time.Duration
 	expectedBytes := expectedSamples * 2
 
 	stream.mu.Lock()
-	
+
 	// Get packets sorted by RTP timestamp
 	packets := make([]*audioPacket, 0, len(stream.packets))
 	for _, p := range stream.packets {
 		packets = append(packets, p)
 	}
-	
+
 	if len(packets) == 0 {
 		stream.mu.Unlock()
+
 		return make([]byte, expectedBytes)
 	}
-	
+
 	sort.Slice(packets, func(i, j int) bool {
 		return packets[i].rtpTimestamp < packets[j].rtpTimestamp
 	})
@@ -317,7 +320,7 @@ func (m *audioMixer) extractUserAudio(stream *userStream, duration time.Duration
 	for _, packet := range packets {
 		delete(stream.packets, packet.sequence)
 	}
-	
+
 	stream.mu.Unlock()
 
 	// Adjust to expected size
@@ -365,7 +368,7 @@ func (m *audioMixer) mixMultipleStreams(streams []*userStream, duration time.Dur
 			// Apply adaptive weight and soft limiting
 			absSum := float32(math.Abs(float64(sum)))
 			compressionScale := float32(1.0)
-			
+
 			if absSum > 0.7 {
 				compressionScale = 0.9 / absSum
 				if compressionScale < 0.7 {
@@ -403,6 +406,7 @@ func (m *audioMixer) GetAllAvailableMixedAudio() ([]byte, time.Duration, error) 
 			}
 		}
 		stream.mu.RUnlock()
+
 		return true
 	})
 
@@ -422,6 +426,7 @@ func (m *audioMixer) GetAllAvailableMixedAudio() ([]byte, time.Duration, error) 
 
 	// Get mixed audio
 	mixed, err := m.GetMixedAudio(duration)
+
 	return mixed, duration, err
 }
 
@@ -432,6 +437,7 @@ func (m *audioMixer) GetAllAvailableMixedAudioAndFlush() ([]byte, time.Duration,
 	}
 
 	m.ClearAllBuffers()
+
 	return mixed, duration, nil
 }
 
@@ -447,6 +453,7 @@ func (m *audioMixer) ClearAllBuffers() {
 		stream.cumulativeEnergy = 0
 		stream.packetCount = 0
 		stream.mu.Unlock()
+
 		return true
 	})
 }
@@ -465,7 +472,7 @@ func (m *audioMixer) GetDominantSpeaker() (discord.UserID, float32) {
 		if stream.lastUpdate.After(recentTime) && stream.packetCount > 0 {
 			// Use cumulative energy to find who spoke the most overall
 			cumulativeEnergy := stream.cumulativeEnergy
-			
+
 			if cumulativeEnergy > maxCumulativeEnergy {
 				maxCumulativeEnergy = cumulativeEnergy
 				dominantUser = stream.userID
@@ -474,6 +481,7 @@ func (m *audioMixer) GetDominantSpeaker() (discord.UserID, float32) {
 			activeUsers++
 		}
 		stream.mu.RUnlock()
+
 		return true
 	})
 
@@ -516,6 +524,7 @@ func (m *audioMixer) bytesToFloat32(audio []byte) []float32 {
 		sample := int16(uint16(audio[i]) | (uint16(audio[i+1]) << 8))
 		samples[i/2] = float32(sample) / 32768.0
 	}
+
 	return samples
 }
 
@@ -533,5 +542,6 @@ func (m *audioMixer) float32ToBytes(samples []float32) []byte {
 		result[i*2] = byte(sample16)
 		result[i*2+1] = byte(sample16 >> 8)
 	}
+
 	return result
 }

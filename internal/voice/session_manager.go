@@ -5,9 +5,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/diamondburned/arikawa/v3/discord"
 	"go.uber.org/zap"
+
+	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 )
 
 type SessionManager interface {
@@ -19,7 +20,6 @@ type SessionManager interface {
 
 	// Update session activity
 	UpdateActivity(guildID discord.GuildID) error
-
 
 	// End session
 	EndSession(guildID discord.GuildID) error
@@ -35,7 +35,6 @@ type SessionManager interface {
 
 	// Update token usage
 	UpdateTokenUsage(guildID discord.GuildID, inputTokens, outputTokens int) error
-
 }
 
 type sessionManager struct {
@@ -117,7 +116,6 @@ func (sm *sessionManager) UpdateActivity(guildID discord.GuildID) error {
 
 	return nil
 }
-
 
 func (sm *sessionManager) EndSession(guildID discord.GuildID) error {
 	sm.mu.Lock()
@@ -203,16 +201,14 @@ func (sm *sessionManager) UpdateTokenUsage(guildID discord.GuildID, inputTokens,
 	return nil
 }
 
-
-
-// Error definitions
+// Error definitions.
 var (
 	ErrSessionAlreadyExists = NewVoiceError("session already exists for this guild")
 	ErrSessionNotFound      = NewVoiceError("session not found")
 	ErrMaxSessionsReached   = NewVoiceError("maximum concurrent sessions reached")
 )
 
-// VoiceError represents errors specific to voice operations
+// VoiceError represents errors specific to voice operations.
 type VoiceError struct {
 	message string
 }

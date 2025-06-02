@@ -197,6 +197,7 @@ func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID disc
 			case <-ctx.Done():
 				m.logger.Info("Stopped receiving audio",
 					zap.String("channel_id", channelID.String()))
+
 				return
 			default:
 				// Read audio packet from the voice session
@@ -207,11 +208,13 @@ func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID disc
 					// Check if context was canceled
 					if ctx.Err() != nil {
 						m.logger.Info("Context canceled, stopping audio receive")
+
 						return
 					}
 					m.logger.Debug("Failed to read voice packet",
 						zap.Error(err),
 						zap.String("channel_id", channelID.String()))
+
 					continue
 				}
 
@@ -259,4 +262,3 @@ func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID disc
 
 	return audioChannel, nil
 }
-

@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -71,7 +72,6 @@ func (c *VoiceCommand) Options() []discord.CommandOption {
 }
 
 func (c *VoiceCommand) Execute(ctx context.Context, s *session.Session, e *gateway.InteractionCreateEvent, data *discord.CommandInteraction) error {
-
 	// Get action parameter
 	var action string
 	var model string
@@ -107,7 +107,7 @@ func (c *VoiceCommand) Execute(ctx context.Context, s *session.Session, e *gatew
 	case "status":
 		return c.handleStatus(ctx, s, e, guildID)
 	default:
-		return c.respondError(s, e.ID, e.Token, fmt.Sprintf("Unknown action: %s", action))
+		return c.respondError(s, e.ID, e.Token, "Unknown action: "+action)
 	}
 }
 
@@ -134,6 +134,7 @@ func (c *VoiceCommand) handleStart(ctx context.Context, s *session.Session, e *g
 	err = s.RespondInteraction(e.ID, e.Token, initialResp)
 	if err != nil {
 		c.logger.Error("Failed to respond to voice start interaction", zap.Error(err))
+
 		return err
 	}
 
@@ -147,11 +148,12 @@ func (c *VoiceCommand) handleStart(ctx context.Context, s *session.Session, e *g
 				zap.String("user_id", userID.String()))
 
 			// Send follow-up message with error
-			errorMsg := fmt.Sprintf("❌ Failed to start voice session: %s", err.Error())
+			errorMsg := "❌ Failed to start voice session: " + err.Error()
 			_, followUpErr := s.SendMessage(textChannelID, errorMsg)
 			if followUpErr != nil {
 				c.logger.Error("Failed to send error follow-up message", zap.Error(followUpErr))
 			}
+
 			return
 		}
 
@@ -202,7 +204,7 @@ func (c *VoiceCommand) handleStop(ctx context.Context, s *session.Session, e *ga
 			zap.String("guild_id", guildID.String()),
 			zap.String("user_id", userID.String()))
 
-		return c.respondError(s, e.ID, e.Token, fmt.Sprintf("Failed to stop voice session: %s", err.Error()))
+		return c.respondError(s, e.ID, e.Token, "Failed to stop voice session: "+err.Error())
 	}
 
 	resp := api.InteractionResponse{
@@ -238,7 +240,7 @@ func (c *VoiceCommand) handleStatus(_ context.Context, s *session.Session, e *ga
 			for i, userID := range status.ActiveUsers {
 				userMentions[i] = fmt.Sprintf("<@%s>", userID)
 			}
-			activeUsersList = fmt.Sprintf("\n👥 Active users: %s", strings.Join(userMentions, ", "))
+			activeUsersList = "\n👥 Active users: " + strings.Join(userMentions, ", ")
 		}
 
 		costInfo := ""
@@ -278,7 +280,7 @@ func (c *VoiceCommand) getUserVoiceChannel(s *session.Session, guildID discord.G
 			zap.String("user_id", userID.String()),
 			zap.String("guild_id", guildID.String()))
 
-		return 0, fmt.Errorf("user is not currently in a voice channel")
+		return 0, errors.New("user is not currently in a voice channel")
 	}
 
 	c.logger.Debug("Found user in voice channel",
@@ -288,7 +290,7 @@ func (c *VoiceCommand) getUserVoiceChannel(s *session.Session, guildID discord.G
 	return voiceState.ChannelID, nil
 }
 
-// getUserVoiceChannelFallback attempts to find the user by checking all voice channels
+// getUserVoiceChannelFallback attempts to find the user by checking all voice channels.
 func (c *VoiceCommand) getUserVoiceChannelFallback(_ *session.Session, guildID discord.GuildID, userID discord.UserID) (discord.ChannelID, error) {
 	// Get all voice states for the guild as a fallback
 	voiceStates, err := c.state.VoiceStates(guildID)
@@ -297,7 +299,7 @@ func (c *VoiceCommand) getUserVoiceChannelFallback(_ *session.Session, guildID d
 			zap.Error(err),
 			zap.String("guild_id", guildID.String()))
 
-		return 0, fmt.Errorf("unable to query voice states - ensure bot has GUILD_VOICE_STATES intent and permissions")
+		return 0, errors.New("unable to query voice states - ensure bot has GUILD_VOICE_STATES intent and permissions")
 	}
 
 	// Search through all voice states for the user
@@ -311,14 +313,14 @@ func (c *VoiceCommand) getUserVoiceChannelFallback(_ *session.Session, guildID d
 		}
 	}
 
-	return 0, fmt.Errorf("user is not currently in a voice channel")
+	return 0, errors.New("user is not currently in a voice channel")
 }
 
 func (c *VoiceCommand) respondError(s *session.Session, interactionID discord.InteractionID, token string, message string) error {
 	resp := api.InteractionResponse{
 		Type: api.MessageInteractionWithSource,
 		Data: &api.InteractionResponseData{
-			Content: option.NewNullableString(fmt.Sprintf("❌ %s", message)),
+			Content: option.NewNullableString("❌ " + message),
 			Flags:   discord.EphemeralMessage,
 		},
 	}
@@ -327,5 +329,6 @@ func (c *VoiceCommand) respondError(s *session.Session, interactionID discord.In
 	if err != nil {
 		c.logger.Error("Failed to send error response", zap.Error(err), zap.String("message", message))
 	}
+
 	return err
 }

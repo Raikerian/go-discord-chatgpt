@@ -2,6 +2,7 @@ package voice
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"math"
 	"sort"
@@ -10,8 +11,9 @@ import (
 
 	"layeh.com/gopus"
 
-	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"go.uber.org/zap"
+
+	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 )
 
 type AudioProcessor interface {
@@ -51,21 +53,21 @@ type SilenceDetector struct {
 }
 
 const (
-	// Discord native format
+	// Discord native format.
 	DiscordSampleRate = 48000
 	DiscordChannels   = 2
 	DiscordBitrate    = 64000
 
-	// OpenAI Realtime requirements
+	// OpenAI Realtime requirements.
 	OpenAISampleRate = 24000 // Required by API
 	OpenAIChannels   = 1     // Mono required
 	OpenAIBitDepth   = 16    // 16-bit PCM
 
-	// Frame sizes for different sample rates
+	// Frame sizes for different sample rates.
 	DiscordFrameSize = 960 // 20ms at 48kHz
 	OpenAIFrameSize  = 480 // 20ms at 24kHz
 
-	// Audio processing constants
+	// Audio processing constants.
 	MaxSilenceDetectionSamples = 1000
 	DefaultThresholdMargin     = 5.0
 	MinimumThreshold           = 0.005 // Minimum threshold to prevent over-sensitivity
@@ -186,13 +188,14 @@ func NewAudioProcessor(logger *zap.Logger, cfg *config.Config) (AudioProcessor, 
 
 func (p *audioProcessor) OpusToPCM(opusData []byte) ([]byte, error) {
 	if len(opusData) == 0 {
-		return nil, fmt.Errorf("empty opus data")
+		return nil, errors.New("empty opus data")
 	}
 
 	p.mu.RLock()
 	if p.closed {
 		p.mu.RUnlock()
-		return nil, fmt.Errorf("audio processor is closed")
+
+		return nil, errors.New("audio processor is closed")
 	}
 	decoder := p.opusDecoder
 	p.mu.RUnlock()
@@ -202,7 +205,7 @@ func (p *audioProcessor) OpusToPCM(opusData []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode opus data: %w", err)
 	}
-	
+
 	// Validate that decoder returns expected size
 	expectedSamples := DiscordFrameSize * DiscordChannels
 	if len(pcm48Stereo) != expectedSamples {
@@ -230,7 +233,7 @@ func (p *audioProcessor) OpusToPCM(opusData []byte) ([]byte, error) {
 
 func (p *audioProcessor) PCMToBase64(pcm []byte) (string, error) {
 	if len(pcm) == 0 {
-		return "", fmt.Errorf("empty PCM data")
+		return "", errors.New("empty PCM data")
 	}
 
 	encoded := base64.StdEncoding.EncodeToString(pcm)
@@ -244,7 +247,7 @@ func (p *audioProcessor) PCMToBase64(pcm []byte) (string, error) {
 
 func (p *audioProcessor) Base64ToPCM(base64Audio string) ([]byte, error) {
 	if base64Audio == "" {
-		return nil, fmt.Errorf("empty base64 audio data")
+		return nil, errors.New("empty base64 audio data")
 	}
 
 	pcm, err := base64.StdEncoding.DecodeString(base64Audio)
@@ -267,7 +270,7 @@ func (p *audioProcessor) Base64ToPCM(base64Audio string) ([]byte, error) {
 
 func (p *audioProcessor) PCMToOpus(pcm []byte) ([]byte, error) {
 	if len(pcm) == 0 {
-		return nil, fmt.Errorf("empty PCM data")
+		return nil, errors.New("empty PCM data")
 	}
 
 	// Convert bytes to int16 samples
@@ -436,6 +439,7 @@ func (p *audioProcessor) Close() error {
 	p.opusEncoder = nil
 
 	p.logger.Info("Audio processor closed")
+
 	return nil
 }
 
@@ -462,6 +466,7 @@ func (p *audioProcessor) calculateRMSEnergy(audio []byte) float32 {
 	}
 
 	rms := math.Sqrt(sum / float64(sampleCount))
+
 	return float32(rms)
 }
 
@@ -506,7 +511,7 @@ func (p *audioProcessor) updateAdaptiveThreshold() {
 		zap.Int("buffer_samples", len(p.silenceDetector.energyBuffer)))
 }
 
-// resampleStereoToMono converts 48kHz stereo to 24kHz mono with proper anti-aliasing
+// resampleStereoToMono converts 48kHz stereo to 24kHz mono with proper anti-aliasing.
 func (p *audioProcessor) resampleStereoToMono(stereoSamples []int16) []int16 {
 	if len(stereoSamples) == 0 {
 		return []int16{}
@@ -550,7 +555,7 @@ func (p *audioProcessor) resampleStereoToMono(stereoSamples []int16) []int16 {
 	return output
 }
 
-// resampleMonoToStereo converts 24kHz mono to 48kHz stereo with improved interpolation
+// resampleMonoToStereo converts 24kHz mono to 48kHz stereo with improved interpolation.
 func (p *audioProcessor) resampleMonoToStereo(monoSamples []int16) []int16 {
 	if len(monoSamples) == 0 {
 		return []int16{}
@@ -590,7 +595,7 @@ func (p *audioProcessor) resampleMonoToStereo(monoSamples []int16) []int16 {
 	return output
 }
 
-// int16ToBytes converts int16 samples to byte array (little-endian)
+// int16ToBytes converts int16 samples to byte array (little-endian).
 func (p *audioProcessor) int16ToBytes(samples []int16) []byte {
 	bytes := make([]byte, len(samples)*2)
 
@@ -602,7 +607,7 @@ func (p *audioProcessor) int16ToBytes(samples []int16) []byte {
 	return bytes
 }
 
-// bytesToInt16 converts byte array to int16 samples (little-endian)
+// bytesToInt16 converts byte array to int16 samples (little-endian).
 func (p *audioProcessor) bytesToInt16(bytes []byte) []int16 {
 	sampleCount := len(bytes) / 2
 	samples := make([]int16, sampleCount)
@@ -614,10 +619,10 @@ func (p *audioProcessor) bytesToInt16(bytes []byte) []int16 {
 	return samples
 }
 
-// validatePCMFormat validates that PCM data matches OpenAI Realtime API requirements
+// validatePCMFormat validates that PCM data matches OpenAI Realtime API requirements.
 func (p *audioProcessor) validatePCMFormat(pcm []byte) error {
 	if len(pcm) == 0 {
-		return fmt.Errorf("empty PCM data")
+		return errors.New("empty PCM data")
 	}
 
 	// OpenAI Realtime API expects 16-bit PCM, so data length must be even
@@ -648,6 +653,7 @@ func (p *audioProcessor) validatePCMFormat(pcm []byte) error {
 	for _, sample := range samples {
 		if sample != 0 {
 			allZero = false
+
 			break
 		}
 	}

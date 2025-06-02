@@ -3,12 +3,14 @@ package voice
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 
-	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	openairt "github.com/WqyJh/go-openai-realtime"
 	"github.com/sashabaranov/go-openai"
 	"go.uber.org/zap"
+
+	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 )
 
 type RealtimeProvider interface {
@@ -125,7 +127,7 @@ func (p *openAIRealtimeProvider) Connect(ctx context.Context, model string) (*Re
 	connection := &RealtimeConnection{
 		Connected: true,
 		Model:     model,
-		SessionID: fmt.Sprintf("session-%s", model),
+		SessionID: "session-" + model,
 	}
 
 	p.connection = connection
@@ -142,6 +144,7 @@ func (p *openAIRealtimeProvider) Connect(ctx context.Context, model string) (*Re
 	err = p.ConfigureSession(sessionConfig)
 	if err != nil {
 		p.Close()
+
 		return nil, fmt.Errorf("failed to configure session: %w", err)
 	}
 
@@ -154,7 +157,7 @@ func (p *openAIRealtimeProvider) Connect(ctx context.Context, model string) (*Re
 
 func (p *openAIRealtimeProvider) SendAudio(ctx context.Context, audioBase64 string) error {
 	if p.connection == nil || !p.connection.Connected {
-		return fmt.Errorf("not connected to OpenAI Realtime API")
+		return errors.New("not connected to OpenAI Realtime API")
 	}
 
 	p.logger.Info("Sending audio to OpenAI",
@@ -170,7 +173,7 @@ func (p *openAIRealtimeProvider) SendAudio(ctx context.Context, audioBase64 stri
 
 func (p *openAIRealtimeProvider) CommitAudio(ctx context.Context) error {
 	if p.connection == nil || !p.connection.Connected {
-		return fmt.Errorf("not connected to OpenAI Realtime API")
+		return errors.New("not connected to OpenAI Realtime API")
 	}
 
 	p.logger.Info("Committing audio buffer to OpenAI")
@@ -183,7 +186,7 @@ func (p *openAIRealtimeProvider) CommitAudio(ctx context.Context) error {
 
 func (p *openAIRealtimeProvider) GenerateResponse(ctx context.Context) error {
 	if p.connection == nil || !p.connection.Connected {
-		return fmt.Errorf("not connected to OpenAI Realtime API")
+		return errors.New("not connected to OpenAI Realtime API")
 	}
 
 	p.logger.Info("Requesting response generation from OpenAI")
@@ -208,7 +211,7 @@ func (p *openAIRealtimeProvider) SetResponseHandlers(handlers ResponseHandlers) 
 
 func (p *openAIRealtimeProvider) ConfigureSession(config SessionConfig) error {
 	if p.connection == nil || !p.connection.Connected {
-		return fmt.Errorf("not connected to OpenAI Realtime API")
+		return errors.New("not connected to OpenAI Realtime API")
 	}
 
 	p.logger.Info("Configuring OpenAI session",
@@ -286,7 +289,7 @@ func (p *openAIRealtimeProvider) Close() error {
 	return nil
 }
 
-// handleServerEvent handles incoming server events from the WebSocket
+// handleServerEvent handles incoming server events from the WebSocket.
 func (p *openAIRealtimeProvider) handleServerEvent(ctx context.Context, event openairt.ServerEvent) {
 	p.logger.Debug("Received server event",
 		zap.String("event_type", string(event.ServerEventType())))
@@ -299,6 +302,7 @@ func (p *openAIRealtimeProvider) handleServerEvent(ctx context.Context, event op
 			audioData, err := base64.StdEncoding.DecodeString(delta.Delta)
 			if err != nil {
 				p.logger.Error("Failed to decode audio delta", zap.Error(err))
+
 				return
 			}
 			p.logger.Debug("Received audio delta from OpenAI",

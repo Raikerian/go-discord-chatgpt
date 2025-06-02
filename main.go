@@ -19,8 +19,9 @@ import (
 	"github.com/Raikerian/go-discord-chatgpt/internal/openai"
 	"github.com/Raikerian/go-discord-chatgpt/internal/voice"
 
-	pkginfra "github.com/Raikerian/go-discord-chatgpt/pkg/infrastructure"
 	_ "github.com/WqyJh/go-openai-realtime"
+
+	pkginfra "github.com/Raikerian/go-discord-chatgpt/pkg/infrastructure"
 
 	"go.uber.org/fx"
 )

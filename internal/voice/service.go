@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -139,12 +140,12 @@ func NewService(
 func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID discord.ChannelID, textChannelID discord.ChannelID, initiatorID discord.UserID, model string) (*VoiceSession, error) {
 	// Check if session already exists for this guild
 	if _, exists := s.activeSessions.Load(guildID); exists {
-		return nil, fmt.Errorf("voice session already active in this guild")
+		return nil, errors.New("voice session already active in this guild")
 	}
 
 	// Check user permissions
 	if !s.canExecuteCommand(initiatorID) {
-		return nil, fmt.Errorf("user does not have permission to use voice commands")
+		return nil, errors.New("user does not have permission to use voice commands")
 	}
 
 	// Check concurrent session limit
@@ -187,6 +188,7 @@ func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID 
 	_, err := s.voiceManager.JoinChannel(ctx, channelID)
 	if err != nil {
 		s.activeSessions.Delete(guildID)
+
 		return nil, fmt.Errorf("failed to join voice channel: %w", err)
 	}
 
@@ -195,6 +197,7 @@ func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID 
 	if err != nil {
 		s.voiceManager.LeaveChannel(ctx, channelID)
 		s.activeSessions.Delete(guildID)
+
 		return nil, fmt.Errorf("failed to connect to OpenAI Realtime: %w", err)
 	}
 
@@ -219,14 +222,14 @@ func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID 
 func (s *Service) Stop(ctx context.Context, guildID discord.GuildID, userID discord.UserID) error {
 	sessionInterface, exists := s.activeSessions.Load(guildID)
 	if !exists {
-		return fmt.Errorf("no active voice session in this guild")
+		return errors.New("no active voice session in this guild")
 	}
 
 	session := sessionInterface.(*VoiceSession)
 
 	// Check permissions
 	if !s.canStopSession(userID, session) {
-		return fmt.Errorf("user does not have permission to stop this session")
+		return errors.New("user does not have permission to stop this session")
 	}
 
 	return s.endSession(ctx, session, "stopped by user")
@@ -285,6 +288,7 @@ func (s *Service) isAllowedUser(userID discord.UserID) bool {
 
 	userIDStr := userID.String()
 	_, allowed := s.allowedUsersMap[userIDStr]
+
 	return allowed
 }
 
@@ -294,6 +298,7 @@ func (s *Service) isModelAllowed(model string) bool {
 	}
 
 	_, allowed := s.allowedModelsMap[model]
+
 	return allowed
 }
 
@@ -301,8 +306,10 @@ func (s *Service) getActiveSessionCount() int {
 	count := 0
 	s.activeSessions.Range(func(key, value any) bool {
 		count++
+
 		return true
 	})
+
 	return count
 }
 
@@ -315,6 +322,7 @@ func (s *Service) processAudio(ctx context.Context, session *VoiceSession) {
 	if err != nil {
 		s.logger.Error("Failed to start receiving audio", zap.Error(err))
 		s.endSession(ctx, session, fmt.Sprintf("failed to start receiving audio: %v", err))
+
 		return
 	}
 
@@ -344,13 +352,15 @@ func (s *Service) setupAudioHandlers(ctx context.Context, session *VoiceSession)
 	if err != nil {
 		s.logger.Error("Failed to set response handlers", zap.Error(err))
 		s.endSession(ctx, session, fmt.Sprintf("failed to set response handlers: %v", err))
+
 		return err
 	}
+
 	return nil
 }
 
 func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audioChannel <-chan *AudioPacket) {
-	var lastPacketTime time.Time = time.Now() // Initialize to prevent initial commit
+	var lastPacketTime = time.Now() // Initialize to prevent initial commit
 	// Use a shorter timeout for more responsive audio processing
 	timeoutDuration := 200 * time.Millisecond // 200ms of no packets = commit audio
 
@@ -366,6 +376,7 @@ func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audio
 		case packet, ok := <-audioChannel:
 			if !ok || packet == nil {
 				s.logger.Debug("Audio channel closed, exiting processAudio")
+
 				return
 			}
 
@@ -385,6 +396,7 @@ func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audio
 
 		case <-ctx.Done():
 			s.endSession(ctx, session, "context canceled")
+
 			return
 		}
 	}
@@ -398,17 +410,18 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 		zap.Uint32("rtp_timestamp", packet.RTPTimestamp),
 		zap.Uint16("sequence", packet.Sequence))
 
-	pcm, err := s.audioProcessor.OpusToPCM(packet.Opus)
-	if err != nil {
-		s.logger.Debug("Failed to convert Opus to PCM",
-			zap.Error(err),
-			zap.String("user_id", packet.UserID.String()))
-		return
-	}
+	// pcm, err := s.audioProcessor.OpusToPCM(packet.Opus)
+	// if err != nil {
+	// 	s.logger.Debug("Failed to convert Opus to PCM",
+	// 		zap.Error(err),
+	// 		zap.String("user_id", packet.UserID.String()))
+
+	// 	return
+	// }
 
 	// Add all audio to mixer without silence detection
 	// Use the RTP-aware method to track timing properly
-	s.audioMixer.AddUserAudioWithRTP(packet.UserID, pcm, packet.Timestamp, packet.RTPTimestamp, packet.Sequence)
+	s.audioMixer.AddUserAudioWithRTP(packet.UserID, packet.Opus, packet.Timestamp, packet.RTPTimestamp, packet.Sequence)
 	s.sessionManager.UpdateActivity(session.GuildID)
 	s.sessionManager.UpdateAudioTime(session.GuildID)
 
@@ -423,24 +436,26 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 
 	s.logger.Debug("Added audio to mixer",
 		zap.String("user_id", packet.UserID.String()),
-		zap.Int("pcm_length", len(pcm)),
+		zap.Int("pcm_length", len(packet.Opus)),
 		zap.Time("timestamp", packet.Timestamp),
 		zap.Uint32("rtp_timestamp", packet.RTPTimestamp))
 }
 
-// commitMixerAudio gets mixed audio from the mixer and sends it to OpenAI
+// commitMixerAudio gets mixed audio from the mixer and sends it to OpenAI.
 func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
 	// Get all available audio and immediately flush buffers
 	// This atomic operation ensures we don't miss any audio or leave stale data
 	mixedAudio, actualDuration, err := s.audioMixer.GetAllAvailableMixedAudioAndFlush()
 	if err != nil {
 		s.logger.Error("Failed to mix audio", zap.Error(err))
+
 		return
 	}
 
 	// Check if we got any audio
 	if len(mixedAudio) == 0 || actualDuration == 0 {
 		s.logger.Debug("No audio to commit")
+
 		return
 	}
 
@@ -458,6 +473,7 @@ func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
 	isSilent, energy := s.audioProcessor.DetectSilence(mixedAudio)
 	if isSilent {
 		s.logger.Debug("Mixed audio is silent, skipping send", zap.Float32("energy", energy))
+
 		return
 	}
 
@@ -483,6 +499,7 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 		if err := s.saveDebugWAV(mixedAudio, session.GuildID, "mixed"); err != nil {
 			s.logger.Error("Failed to save mixed audio WAV", zap.Error(err))
 		}
+
 		return
 	}
 
@@ -490,6 +507,7 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 	audioBase64, err := s.audioProcessor.PCMToBase64(mixedAudio)
 	if err != nil {
 		s.logger.Error("Failed to convert PCM to base64", zap.Error(err))
+
 		return
 	}
 
@@ -500,6 +518,7 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 	err = s.realtimeProvider.SendAudio(ctx, audioBase64)
 	if err != nil {
 		s.logger.Error("Failed to send audio to OpenAI", zap.Error(err))
+
 		return
 	}
 
@@ -507,6 +526,7 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 	err = s.realtimeProvider.CommitAudio(ctx)
 	if err != nil {
 		s.logger.Error("Failed to commit audio buffer", zap.Error(err))
+
 		return
 	}
 
@@ -514,6 +534,7 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 	err = s.realtimeProvider.GenerateResponse(ctx)
 	if err != nil {
 		s.logger.Error("Failed to request response generation", zap.Error(err))
+
 		return
 	}
 
@@ -622,6 +643,7 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 				zap.Error(err),
 				zap.Int("frame_index", frameIndex),
 				zap.Int("frame_size", len(frameData)))
+
 			return
 		}
 
@@ -636,6 +658,7 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 			case <-ctx.Done():
 				timer.Stop()
 				s.logger.Debug("Context canceled during frame timing wait")
+
 				return
 			}
 			timer.Stop()
@@ -653,6 +676,7 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 			s.logger.Error("Failed to send audio frame to Discord",
 				zap.Error(err),
 				zap.Int("frame_index", frameIndex))
+
 			return
 		}
 		sendDuration := time.Since(sendStartTime)
@@ -666,7 +690,7 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 			zap.Time("actual_time", sendStartTime))
 
 		// Adjust frame timing to correct for accumulated drift
-		drift := time.Now().Sub(expectedFrameTime)
+		drift := time.Since(expectedFrameTime)
 		if drift > 5*time.Millisecond {
 			// Resync: push frameStartTime forward by drift to catch up
 			frameStartTime = frameStartTime.Add(drift)
@@ -713,6 +737,7 @@ func (s *Service) handleResponseDone(ctx context.Context, session *VoiceSession,
 	if _, exists := s.activeSessions.Load(session.GuildID); !exists {
 		s.logger.Debug("Session no longer active, skipping response processing",
 			zap.String("guild_id", session.GuildID.String()))
+
 		return
 	}
 
@@ -721,6 +746,7 @@ func (s *Service) handleResponseDone(ctx context.Context, session *VoiceSession,
 	if err != nil {
 		s.logger.Debug("Failed to update token usage", zap.Error(err),
 			zap.String("guild_id", session.GuildID.String()))
+
 		return // Session was likely cleaned up
 	}
 
@@ -737,6 +763,7 @@ func (s *Service) handleResponseDone(ctx context.Context, session *VoiceSession,
 		if err != nil {
 			s.logger.Debug("Failed to update session cost", zap.Error(err),
 				zap.String("guild_id", session.GuildID.String()))
+
 			return // Session was likely cleaned up
 		}
 
@@ -760,6 +787,7 @@ func (s *Service) checkCostLimits(ctx context.Context, session *VoiceSession, co
 			zap.Float64("limit", s.cfg.MaxCostPerSession))
 
 		s.endSession(ctx, session, fmt.Sprintf("cost limit exceeded ($%.2f)", cost))
+
 		return
 	}
 
@@ -785,6 +813,7 @@ func (s *Service) endSession(ctx context.Context, session *VoiceSession, reason 
 	session.mu.Lock()
 	if session.State == SessionStateEnding || session.State == SessionStateEnded {
 		session.mu.Unlock()
+
 		return nil
 	}
 	session.State = SessionStateEnding
@@ -868,18 +897,21 @@ func (s *Service) runWatchdog(ctx context.Context) {
 				// Check inactivity timeout
 				if time.Since(lastAudioTime) > time.Duration(s.cfg.InactivityTimeout)*time.Second {
 					s.endSession(ctx, session, "inactivity timeout")
+
 					return true
 				}
 
 				// Check session duration
 				if time.Since(startTime) > time.Duration(s.cfg.MaxSessionLength)*time.Minute {
 					s.endSession(ctx, session, "maximum session length reached")
+
 					return true
 				}
 
 				// Check cost limit
 				if sessionCost >= s.cfg.MaxCostPerSession {
 					s.endSession(ctx, session, fmt.Sprintf("cost limit reached ($%.2f)", sessionCost))
+
 					return true
 				}
 
@@ -901,13 +933,14 @@ func (s *Service) Shutdown(ctx context.Context) error {
 	s.activeSessions.Range(func(key, value any) bool {
 		session := value.(*VoiceSession)
 		s.endSession(ctx, session, "service shutdown")
+
 		return true
 	})
 
 	return nil
 }
 
-// saveDebugWAV saves PCM audio as a WAV file for debugging
+// saveDebugWAV saves PCM audio as a WAV file for debugging.
 func (s *Service) saveDebugWAV(pcmData []byte, guildID discord.GuildID, prefix string) error {
 	// Create debug directory if it doesn't exist
 	debugDir := "debug_audio"
@@ -940,12 +973,12 @@ func (s *Service) saveDebugWAV(pcmData []byte, guildID discord.GuildID, prefix s
 	fileSize := dataSize + 36 // 36 = header size without data chunk size
 
 	// Write RIFF header
-	file.Write([]byte("RIFF"))
+	file.WriteString("RIFF")
 	binary.Write(file, binary.LittleEndian, fileSize)
-	file.Write([]byte("WAVE"))
+	file.WriteString("WAVE")
 
 	// Write fmt chunk
-	file.Write([]byte("fmt "))
+	file.WriteString("fmt ")
 	binary.Write(file, binary.LittleEndian, uint32(16)) // fmt chunk size
 	binary.Write(file, binary.LittleEndian, uint16(1))  // PCM format
 	binary.Write(file, binary.LittleEndian, uint16(numChannels))
@@ -955,7 +988,7 @@ func (s *Service) saveDebugWAV(pcmData []byte, guildID discord.GuildID, prefix s
 	binary.Write(file, binary.LittleEndian, uint16(bitsPerSample))
 
 	// Write data chunk
-	file.Write([]byte("data"))
+	file.WriteString("data")
 	binary.Write(file, binary.LittleEndian, dataSize)
 	file.Write(pcmData)
 

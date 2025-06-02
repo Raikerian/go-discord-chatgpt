@@ -10,9 +10,9 @@ import (
 
 // TokenPricing represents the cost per million tokens for input, cached input, and output.
 type TokenPricing struct {
-	InputPerMillion       float64  `json:"input_per_million"`       // Cost per 1 million input tokens in USD
-	CachedPerMillion      *float64 `json:"cached_per_million"`      // Cost per 1 million cached input tokens in USD (nil if not supported)
-	OutputPerMillion      *float64 `json:"output_per_million"`      // Cost per 1 million output tokens in USD (nil if not supported)
+	InputPerMillion       float64  `json:"input_per_million"`        // Cost per 1 million input tokens in USD
+	CachedPerMillion      *float64 `json:"cached_per_million"`       // Cost per 1 million cached input tokens in USD (nil if not supported)
+	OutputPerMillion      *float64 `json:"output_per_million"`       // Cost per 1 million output tokens in USD (nil if not supported)
 	AudioInputPerMillion  *float64 `json:"audio_input_per_million"`  // Cost per 1 million audio input tokens in USD (nil if not supported)
 	AudioOutputPerMillion *float64 `json:"audio_output_per_million"` // Cost per 1 million audio output tokens in USD (nil if not supported)
 }

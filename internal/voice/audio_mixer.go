@@ -34,60 +34,48 @@ type AudioMixer interface {
 
 	// Get dominant speaker
 	GetDominantSpeaker() (discord.UserID, float32) // returns userID, confidence
-
-	// Get user audio for debugging
-	GetUserAudioForDebug(userID discord.UserID, duration time.Duration) []byte
 }
 
-// userStream represents a single user's audio processing pipeline
-type userStream struct {
-	mu               sync.Mutex // Protect concurrent access to fields
-	userID           discord.UserID
-	lastUpdate       time.Time
-	lastRTPTimestamp uint32
-	lastSequence     uint16
-	energyLevel      float32
-
-	// Jitter buffer to handle packet reordering and timing
-	jitterBuffer *jitterBuffer
-}
-
-// jitterBuffer handles packet reordering and provides smooth playback
-type jitterBuffer struct {
-	packets map[uint16]*audioPacketData // sequence -> packet
-	mu      sync.Mutex
-}
-
-type audioPacketData struct {
+// audioPacket represents a single audio packet with metadata
+type audioPacket struct {
 	audio        []byte
+	timestamp    time.Time
 	rtpTimestamp uint32
 	sequence     uint16
-	timestamp    time.Time
+}
+
+// userStream represents a user's audio stream
+type userStream struct {
+	mu           sync.RWMutex
+	userID       discord.UserID
+	packets      map[uint16]*audioPacket // sequence -> packet
+	lastUpdate   time.Time
+	energyLevel  float32
+	rtpBase      uint32 // Base RTP timestamp for unwrapping
+	rtpHighBits  uint32 // High bits for RTP unwrapping
+	
+	// Track cumulative energy for dominant speaker detection
+	cumulativeEnergy float64
+	packetCount      int
 }
 
 type audioMixer struct {
-	logger      *zap.Logger
-	cfg         *config.VoiceConfig
-	userStreams sync.Map // map[discord.UserID]*userStream
-	sampleRate  int
-	frameSize   int
+	logger     *zap.Logger
+	cfg        *config.VoiceConfig
+	streams    sync.Map // map[discord.UserID]*userStream
+	sampleRate int
+	frameSize  int
 
-	// Synchronization
-	synchronizer *streamSynchronizer
-
-	// Performance tracking (protected by mutex)
-	mu             sync.Mutex
-	avgMixDuration time.Duration
-	fallbackMode   bool
+	// Performance tracking
+	perfMu      sync.RWMutex
+	avgMixTime  time.Duration
+	fallbackMode bool
 }
 
-// streamSynchronizer manages cross-stream synchronization
-type streamSynchronizer struct {
-	baseTime      time.Time
-	lastRTP       sync.Map // map[discord.UserID]uint64 - unwrapped RTP timestamps
-	streamOffsets sync.Map // map[discord.UserID]int64 - smoothed sample offsets
-	sampleRate    int
-}
+const (
+	maxJitterBufferSize = 500  // Maximum packets in jitter buffer
+	maxBufferAge        = 10 * time.Second
+)
 
 func NewAudioMixer(logger *zap.Logger, cfg *config.Config) AudioMixer {
 	return &audioMixer{
@@ -95,10 +83,6 @@ func NewAudioMixer(logger *zap.Logger, cfg *config.Config) AudioMixer {
 		cfg:        &cfg.Voice,
 		sampleRate: OpenAISampleRate, // 24kHz
 		frameSize:  OpenAIFrameSize,  // 480 samples (20ms at 24kHz)
-		synchronizer: &streamSynchronizer{
-			baseTime:   time.Now(),
-			sampleRate: OpenAISampleRate,
-		},
 	}
 }
 
@@ -108,627 +92,303 @@ func (m *audioMixer) AddUserAudioWithRTP(userID discord.UserID, audio []byte, ti
 	}
 
 	// Get or create user stream
-	streamInt, _ := m.userStreams.LoadOrStore(userID, m.createUserStream(userID))
+	streamInt, _ := m.streams.LoadOrStore(userID, &userStream{
+		userID:  userID,
+		packets: make(map[uint16]*audioPacket),
+		cumulativeEnergy: 0,
+		packetCount: 0,
+	})
 	stream := streamInt.(*userStream)
 
-	// Lock stream for metadata updates
 	stream.mu.Lock()
+	defer stream.mu.Unlock()
 
-	// Update stream metadata
+	// Update metadata
 	stream.lastUpdate = timestamp
+	stream.energyLevel = m.calculateRMS(audio)
+	
+	// Update cumulative energy tracking
+	stream.cumulativeEnergy += float64(stream.energyLevel)
+	stream.packetCount++
 
-	// Check for packet loss or reordering
-	if sequence != 0 && stream.lastSequence != 0 {
-		expectedSeq := stream.lastSequence + 1
-		if sequence != expectedSeq {
-			if sequence < stream.lastSequence {
-				m.logger.Debug("Out of order packet",
-					zap.String("user_id", userID.String()),
-					zap.Uint16("expected", expectedSeq),
-					zap.Uint16("received", sequence))
-			} else {
-				lost := sequence - expectedSeq
-				m.logger.Debug("Packet loss detected",
-					zap.String("user_id", userID.String()),
-					zap.Uint16("lost_packets", lost))
+	// Handle RTP wraparound
+	if len(stream.packets) > 0 {
+		// Find a recent packet for comparison
+		var recentPacket *audioPacket
+		for _, p := range stream.packets {
+			if recentPacket == nil || p.sequence > recentPacket.sequence {
+				recentPacket = p
+			}
+		}
+
+		if recentPacket != nil {
+			// Check for wraparound
+			if rtpTimestamp < recentPacket.rtpTimestamp && (recentPacket.rtpTimestamp-rtpTimestamp) > (1<<31) {
+				// Wraparound detected
+				stream.rtpHighBits++
 			}
 		}
 	}
 
-	// Calculate energy level (RMS)
-	energyLevel := m.calculateRMS(audio)
-	stream.energyLevel = energyLevel
-	stream.lastRTPTimestamp = rtpTimestamp
-	stream.lastSequence = sequence
-
-	stream.mu.Unlock()
-
-	// Update synchronization offset
-	m.synchronizer.calculateOffset(userID, rtpTimestamp, timestamp)
-
-	// Add to jitter buffer
-	packet := &audioPacketData{
+	// Store packet
+	packet := &audioPacket{
 		audio:        audio,
+		timestamp:    timestamp,
 		rtpTimestamp: rtpTimestamp,
 		sequence:     sequence,
-		timestamp:    timestamp,
 	}
-	stream.jitterBuffer.insert(packet)
+	stream.packets[sequence] = packet
+
+	// Clean old packets
+	m.cleanOldPackets(stream)
 
 	m.logger.Debug("Added user audio",
 		zap.String("user_id", userID.String()),
 		zap.Int("audio_size", len(audio)),
-		zap.Float32("energy_level", energyLevel),
-		zap.Uint32("rtp_timestamp", rtpTimestamp),
-		zap.Uint16("sequence", sequence))
+		zap.Float32("energy", stream.energyLevel),
+		zap.Uint32("rtp", rtpTimestamp),
+		zap.Uint16("seq", sequence))
 
 	return nil
 }
 
-func (m *audioMixer) createUserStream(userID discord.UserID) *userStream {
-	return &userStream{
-		userID:       userID,
-		lastUpdate:   time.Now(),
-		jitterBuffer: newJitterBuffer(),
-	}
-}
-
-// newJitterBuffer creates a new jitter buffer with adaptive delay
-func newJitterBuffer() *jitterBuffer {
-	return &jitterBuffer{
-		packets: make(map[uint16]*audioPacketData),
-	}
-}
-
-func (j *jitterBuffer) insert(packet *audioPacketData) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-
-	j.packets[packet.sequence] = packet
-
-	// Keep only recent packets to prevent unbounded growth
-	// Remove packets older than 10 seconds
-	cutoffTime := time.Now().Add(-10 * time.Second)
-	for seq, p := range j.packets {
-		if p.timestamp.Before(cutoffTime) {
-			delete(j.packets, seq)
+func (m *audioMixer) cleanOldPackets(stream *userStream) {
+	cutoff := time.Now().Add(-maxBufferAge)
+	for seq, packet := range stream.packets {
+		if packet.timestamp.Before(cutoff) {
+			delete(stream.packets, seq)
 		}
 	}
 
-	// Also limit by count as a safety measure
-	// 500 packets = ~10 seconds of audio (20ms per packet)
-	const maxPackets = 500
-	if len(j.packets) > maxPackets {
-		// Remove oldest packets based on timestamp
-		packets := make([]*audioPacketData, 0, len(j.packets))
-		for _, p := range j.packets {
+	// Also limit by count
+	if len(stream.packets) > maxJitterBufferSize {
+		// Get all packets sorted by sequence
+		packets := make([]*audioPacket, 0, len(stream.packets))
+		for _, p := range stream.packets {
 			packets = append(packets, p)
 		}
-
-		// Sort by timestamp (oldest first) using efficient sort
 		sort.Slice(packets, func(i, j int) bool {
 			return packets[i].timestamp.Before(packets[j].timestamp)
 		})
 
-		// Remove oldest packets
-		toRemove := len(packets) - maxPackets
+		// Remove oldest
+		toRemove := len(packets) - maxJitterBufferSize
 		for i := 0; i < toRemove; i++ {
-			delete(j.packets, packets[i].sequence)
+			delete(stream.packets, packets[i].sequence)
 		}
 	}
-}
-
-func (s *streamSynchronizer) calculateOffset(userID discord.UserID, rtpTimestamp uint32, arrivalTime time.Time) {
-	// For Discord, RTP timestamps increment by 960 per 20ms frame at 48kHz
-	// We're working at 24kHz, so 480 samples per 20ms
-
-	// Handle RTP timestamp wrap-around (32-bit overflow)
-	var unwrappedRTP uint64
-	if existingRTPInt, ok := s.lastRTP.Load(userID); ok {
-		existingRTP := existingRTPInt.(uint64)
-		currentRTP32 := uint32(existingRTP & 0xFFFFFFFF) // Get the 32-bit part for comparison
-
-		// Check for wrap-around: if new timestamp is much smaller than previous, assume wrap
-		if rtpTimestamp < currentRTP32 && (currentRTP32-rtpTimestamp) > (1<<31) {
-			// Wrap detected: add 2^32 to the high part
-			unwrappedRTP = (existingRTP & 0xFFFFFFFF00000000) + (1 << 32) + uint64(rtpTimestamp)
-		} else {
-			// No wrap: just update the low 32 bits
-			unwrappedRTP = (existingRTP & 0xFFFFFFFF00000000) + uint64(rtpTimestamp)
-		}
-	} else {
-		// First packet for this user
-		unwrappedRTP = uint64(rtpTimestamp)
-	}
-
-	// Store the unwrapped RTP timestamp
-	s.lastRTP.Store(userID, unwrappedRTP)
-
-	elapsedSamples := int64(unwrappedRTP) / 2 // Convert 48kHz to 24kHz
-	elapsedTime := time.Duration(elapsedSamples * 1e9 / int64(s.sampleRate))
-
-	actualElapsed := arrivalTime.Sub(s.baseTime)
-	offset := int64(actualElapsed - elapsedTime)
-
-	// Store or update offset with smoothing
-	if existingInt, ok := s.streamOffsets.Load(userID); ok {
-		existing := existingInt.(int64)
-		// Smooth offset changes to avoid artifacts
-		s.streamOffsets.Store(userID, (existing*7+offset)/8)
-	} else {
-		s.streamOffsets.Store(userID, offset)
-	}
-}
-
-func (s *streamSynchronizer) getOffsetForUser(userID discord.UserID) int64 {
-	if offsetInt, ok := s.streamOffsets.Load(userID); ok {
-		return offsetInt.(int64)
-	}
-	return 0
 }
 
 func (m *audioMixer) GetMixedAudio(duration time.Duration) ([]byte, error) {
 	startTime := time.Now()
 	defer func() {
-		processingTime := time.Since(startTime)
-
-		m.mu.Lock()
-		m.avgMixDuration = (m.avgMixDuration + processingTime) / 2
-
-		// TEMPORARILY DISABLED: Check if we should enter fallback mode
-		// Fallback mode causes second user to disappear by only using dominant speaker
-		if false && processingTime > 8*time.Millisecond {
-			if !m.fallbackMode {
-				m.fallbackMode = true
-				m.logger.Warn("Audio mixing taking too long, enabling fallback mode",
-					zap.Duration("processing_time", processingTime))
-			}
-		} else if m.fallbackMode && processingTime < 5*time.Millisecond {
-			// Exit fallback mode if performance improves
-			m.fallbackMode = false
-			m.logger.Info("Audio mixing performance improved, disabling fallback mode")
-		}
-		m.mu.Unlock()
+		elapsed := time.Since(startTime)
+		m.perfMu.Lock()
+		m.avgMixTime = (m.avgMixTime + elapsed) / 2
+		m.perfMu.Unlock()
 	}()
 
-	// Calculate expected samples
-	expectedSamples := int(duration.Nanoseconds() * int64(m.sampleRate) / int64(time.Second))
-	expectedBytes := expectedSamples * 2 // 16-bit samples
-
-	// Check if in fallback mode
-	m.mu.Lock()
-	fallback := m.fallbackMode
-	m.mu.Unlock()
-
-	// If in fallback mode, use dominant speaker only
-	if fallback {
-		return m.getDominantSpeakerAudio(duration)
+	// Handle negative or zero duration
+	if duration <= 0 {
+		return []byte{}, nil
 	}
 
-	// Find active users and their RTP ranges
-	activeStreams := m.getActiveStreams(duration)
+	expectedSamples := int(duration.Seconds() * float64(m.sampleRate))
+	expectedBytes := expectedSamples * 2
+
+	// Collect active streams
+	activeStreams := m.getActiveStreams()
 	if len(activeStreams) == 0 {
-		// Return silence
-		m.logger.Debug("No active users found, returning silence",
-			zap.Duration("duration", duration),
-			zap.Int("sample_count", expectedSamples))
 		return make([]byte, expectedBytes), nil
 	}
 
-	// Calculate global earliest RTP timestamp across all streams
-	// This is critical for proper multi-user synchronization
-	var globalEarliestRTP uint32 = math.MaxUint32
-	streamRTPRanges := make(map[discord.UserID]struct{ earliest, latest uint32 })
-
-	for _, stream := range activeStreams {
-		stream.jitterBuffer.mu.Lock()
-		var streamEarliest, streamLatest uint32 = math.MaxUint32, 0
-		packetCount := 0
-		
-		for _, pkt := range stream.jitterBuffer.packets {
-			if pkt.rtpTimestamp < streamEarliest {
-				streamEarliest = pkt.rtpTimestamp
-			}
-			if pkt.rtpTimestamp > streamLatest {
-				streamLatest = pkt.rtpTimestamp
-			}
-			if pkt.rtpTimestamp < globalEarliestRTP {
-				globalEarliestRTP = pkt.rtpTimestamp
-			}
-			packetCount++
-		}
-		stream.jitterBuffer.mu.Unlock()
-
-		if packetCount > 0 {
-			streamRTPRanges[stream.userID] = struct{ earliest, latest uint32 }{streamEarliest, streamLatest}
-			m.logger.Debug("Stream RTP range",
-				zap.String("user_id", stream.userID.String()),
-				zap.Uint32("earliest_rtp", streamEarliest),
-				zap.Uint32("latest_rtp", streamLatest),
-				zap.Int("packets", packetCount))
-		}
-	}
-
-	m.logger.Debug("Calculated global earliest RTP for synchronization",
-		zap.Uint32("global_earliest_rtp", globalEarliestRTP),
-		zap.Int("active_streams", len(activeStreams)),
-		zap.Int("streams_with_data", len(streamRTPRanges)))
+	// Find global earliest RTP timestamp
+	globalEarliestRTP := m.findGlobalEarliestRTP(activeStreams)
 
 	if len(activeStreams) == 1 {
 		// Single user, no mixing needed
-		userID := activeStreams[0].userID
-		m.logger.Debug("Single active user found",
-			zap.String("user_id", userID.String()),
-			zap.Duration("duration", duration))
-		return m.getUserAudioAligned(activeStreams[0], duration, globalEarliestRTP), nil
+		return m.extractUserAudio(activeStreams[0], duration, globalEarliestRTP), nil
 	}
 
-	// Multiple users, perform RMS-based mixing
-	m.logger.Info("Mixing multiple active users - CRITICAL PATH",
-		zap.Int("count", len(activeStreams)),
-		zap.Duration("duration", duration),
-		zap.Uint32("global_earliest_rtp", globalEarliestRTP))
-	
-	// Log each user's timing info for multi-user debugging
-	for userID, rtpRange := range streamRTPRanges {
-		deltaFromGlobal := rtpRange.earliest - globalEarliestRTP
-		paddingSamples := int(deltaFromGlobal / 2)
-		m.logger.Info("User timing for mixing",
-			zap.String("user_id", userID.String()),
-			zap.Uint32("earliest_rtp", rtpRange.earliest),
-			zap.Uint32("latest_rtp", rtpRange.latest),
-			zap.Uint32("delta_from_global", deltaFromGlobal),
-			zap.Int("will_pad_samples", paddingSamples))
-	}
-	
-	return m.mixWithRMS(activeStreams, duration, globalEarliestRTP)
+	// Multiple users - perform mixing
+	return m.mixMultipleStreams(activeStreams, duration, globalEarliestRTP)
 }
 
-func (m *audioMixer) getActiveStreams(duration time.Duration) []*userStream {
+func (m *audioMixer) getActiveStreams() []*userStream {
+	var streams []*userStream
 	now := time.Now()
-	// CRITICAL FIX: Use actual duration instead of fixed window
-	// This ensures users who spoke within the mixing window are included
-	cutoffTime := now.Add(-duration)
-	var activeStreams []*userStream
+	cutoff := now.Add(-2 * time.Second)
 
-	m.userStreams.Range(func(key, value any) bool {
+	m.streams.Range(func(key, value interface{}) bool {
 		stream := value.(*userStream)
-		stream.mu.Lock()
-		if stream.lastUpdate.After(cutoffTime) {
-			activeStreams = append(activeStreams, stream)
-			m.logger.Debug("Found active user",
-				zap.String("user_id", stream.userID.String()),
-				zap.Time("last_update", stream.lastUpdate),
-				zap.Duration("age", now.Sub(stream.lastUpdate)))
+		stream.mu.RLock()
+		hasPackets := len(stream.packets) > 0
+		isRecent := stream.lastUpdate.After(cutoff)
+		stream.mu.RUnlock()
+
+		if hasPackets && isRecent {
+			streams = append(streams, stream)
 		}
-		stream.mu.Unlock()
 		return true
 	})
 
-	m.logger.Debug("Active streams for mixing",
-		zap.Int("count", len(activeStreams)),
-		zap.Duration("requested_duration", duration),
-		zap.Time("cutoff", cutoffTime))
-
-	return activeStreams
+	return streams
 }
 
-// getUserAudioAligned returns user audio properly aligned for the given duration
-func (m *audioMixer) getUserAudioAligned(stream *userStream, duration time.Duration, globalZeroRTP uint32) []byte {
-	expectedSamples := int(duration.Nanoseconds() * int64(m.sampleRate) / int64(time.Second))
-	expectedBytes := expectedSamples * 2 // 16-bit samples
+func (m *audioMixer) findGlobalEarliestRTP(streams []*userStream) uint32 {
+	earliest := uint32(math.MaxUint32)
 
-	// Get all packets from jitter buffer
-	stream.jitterBuffer.mu.Lock()
-	packets := make([]*audioPacketData, 0, len(stream.jitterBuffer.packets))
-	for _, packet := range stream.jitterBuffer.packets {
-		packets = append(packets, packet)
+	for _, stream := range streams {
+		stream.mu.RLock()
+		for _, packet := range stream.packets {
+			if packet.rtpTimestamp < earliest {
+				earliest = packet.rtpTimestamp
+			}
+		}
+		stream.mu.RUnlock()
 	}
-	stream.jitterBuffer.mu.Unlock()
 
-	m.logger.Debug("Retrieved packets from jitter buffer",
-		zap.String("user_id", stream.userID.String()),
-		zap.Int("total_packets", len(packets)),
-		zap.Duration("requested_duration", duration),
-		zap.Int("expected_bytes", expectedBytes))
+	return earliest
+}
 
+func (m *audioMixer) extractUserAudio(stream *userStream, duration time.Duration, globalEarliestRTP uint32) []byte {
+	expectedSamples := int(duration.Seconds() * float64(m.sampleRate))
+	expectedBytes := expectedSamples * 2
+
+	stream.mu.Lock()
+	
+	// Get packets sorted by RTP timestamp
+	packets := make([]*audioPacket, 0, len(stream.packets))
+	for _, p := range stream.packets {
+		packets = append(packets, p)
+	}
+	
 	if len(packets) == 0 {
-		m.logger.Debug("No packets in buffer, returning silence",
-			zap.String("user_id", stream.userID.String()))
+		stream.mu.Unlock()
 		return make([]byte, expectedBytes)
 	}
-
-	// Sort packets by RTP timestamp
+	
 	sort.Slice(packets, func(i, j int) bool {
 		return packets[i].rtpTimestamp < packets[j].rtpTimestamp
 	})
 
-	// CRITICAL FIX: Add front padding for late-starting speakers
-	// Find the earliest RTP timestamp for this stream
+	// Calculate front padding
 	streamStartRTP := packets[0].rtpTimestamp
-
-	// Calculate padding based on the global earliest RTP reference
-	// Handle potential integer overflow by using signed arithmetic
-	var padSamples int
-	if streamStartRTP >= globalZeroRTP {
-		deltaRTP := streamStartRTP - globalZeroRTP
-		padSamples = int(deltaRTP / 2) // Convert RTP samples to 24kHz samples (48k → 24k = divide by 2)
-	} else {
-		// Handle RTP timestamp wrap-around or earlier starting streams
-		// In this case, this stream started before the "global zero", so no padding needed
-		padSamples = 0
-		m.logger.Debug("Stream started before global zero RTP, no padding needed",
-			zap.String("user_id", stream.userID.String()),
-			zap.Uint32("stream_start_rtp", streamStartRTP),
-			zap.Uint32("global_zero_rtp", globalZeroRTP))
-	}
-	// Cap at expectedSamples to prevent excessive padding
-	if padSamples > expectedSamples {
-		padSamples = expectedSamples
-	}
-	silenceBytes := padSamples * 2
-
-	m.logger.Debug("Calculating front padding for late starter",
-		zap.String("user_id", stream.userID.String()),
-		zap.Uint32("stream_start_rtp", streamStartRTP),
-		zap.Uint32("global_zero_rtp", globalZeroRTP),
-		zap.Int("pad_samples", padSamples),
-		zap.Int("silence_bytes", silenceBytes))
-
-	// Build result starting with front padding
-	result := make([]byte, 0, expectedBytes)
-	if silenceBytes > 0 {
-		result = append(result, make([]byte, silenceBytes)...)
-		m.logger.Debug("Inserted leading silence for alignment",
-			zap.String("user_id", stream.userID.String()),
-			zap.Int("pad_samples", padSamples))
-	}
-
-	// Track used sequences for deletion
-	usedSequences := make([]uint16, 0, len(packets))
-	packetsUsed := 0
-
-	// Concatenate actual packet audio with gap detection
-	for i, packet := range packets {
-		if len(packet.audio) == 0 {
-			continue
+	padSamples := 0
+	if streamStartRTP > globalEarliestRTP {
+		deltaRTP := streamStartRTP - globalEarliestRTP
+		padSamples = int(deltaRTP / 2) // Convert 48kHz to 24kHz
+		if padSamples > expectedSamples {
+			padSamples = expectedSamples
 		}
+	}
 
-		// Handle gaps between packets by inserting silence
+	result := make([]byte, 0, expectedBytes)
+
+	// Add front padding
+	if padSamples > 0 {
+		result = append(result, make([]byte, padSamples*2)...)
+	}
+
+	// Process packets and handle gaps
+	for i, packet := range packets {
 		if i > 0 {
 			prevPacket := packets[i-1]
-			expectedDeltaSamples := int((packet.rtpTimestamp - prevPacket.rtpTimestamp) / 2) // 48k→24k conversion
-			actualSamplesFromPrev := len(prevPacket.audio) / 2
-			gapSamples := expectedDeltaSamples - actualSamplesFromPrev
+			expectedDelta := int((packet.rtpTimestamp - prevPacket.rtpTimestamp) / 2)
+			actualSamples := len(prevPacket.audio) / 2
+			gapSamples := expectedDelta - actualSamples
 
-			if gapSamples > 0 && gapSamples < 2400 { // Cap at 100ms to avoid huge gaps
-				// Insert silence for positive gaps
-				gapBytes := gapSamples * 2 // 16-bit samples
-				silenceGap := make([]byte, gapBytes)
-				result = append(result, silenceGap...)
-
-				m.logger.Debug("Inserted silence for RTP gap",
-					zap.String("user_id", stream.userID.String()),
-					zap.Int("gap_samples", gapSamples),
-					zap.Uint32("prev_rtp", prevPacket.rtpTimestamp),
-					zap.Uint32("curr_rtp", packet.rtpTimestamp))
+			if gapSamples > 0 && gapSamples < 2400 { // Cap at 100ms
+				// Insert silence for gap
+				result = append(result, make([]byte, gapSamples*2)...)
 			} else if gapSamples < 0 {
-				// Overlap scenario: drop the last |gapSamples| samples from result
-				trimBytes := (-gapSamples) * 2
+				// Handle overlap by trimming
+				trimBytes := -gapSamples * 2
 				if trimBytes < len(result) {
 					result = result[:len(result)-trimBytes]
-				} else {
-					// In case the overlap is larger than what we have, just reset to no content
-					result = []byte{}
 				}
-
-				m.logger.Debug("Trimmed overlapping audio",
-					zap.String("user_id", stream.userID.String()),
-					zap.Int("overlap_samples", -gapSamples),
-					zap.Int("trimmed_bytes", trimBytes),
-					zap.Uint32("prev_rtp", prevPacket.rtpTimestamp),
-					zap.Uint32("curr_rtp", packet.rtpTimestamp))
 			}
 		}
 
 		result = append(result, packet.audio...)
-		packetsUsed++
-		usedSequences = append(usedSequences, packet.sequence)
-
-		m.logger.Debug("Added packet audio",
-			zap.String("user_id", stream.userID.String()),
-			zap.Uint32("rtp_timestamp", packet.rtpTimestamp),
-			zap.Int("audio_bytes", len(packet.audio)),
-			zap.Int("total_so_far", len(result)))
 	}
 
-	// Remove used packets from jitter buffer to prevent replaying
-	stream.jitterBuffer.mu.Lock()
-	for _, sequence := range usedSequences {
-		delete(stream.jitterBuffer.packets, sequence)
+	// Remove used packets
+	for _, packet := range packets {
+		delete(stream.packets, packet.sequence)
 	}
-	stream.jitterBuffer.mu.Unlock()
-
-	m.logger.Debug("Audio concatenation complete",
-		zap.String("user_id", stream.userID.String()),
-		zap.Int("packets_used", packetsUsed),
-		zap.Int("front_padding_bytes", silenceBytes),
-		zap.Int("result_bytes", len(result)))
+	
+	stream.mu.Unlock()
 
 	// Adjust to expected size
 	if len(result) > expectedBytes {
-		// CRITICAL FIX: Always keep the **end** of the buffer (most recent samples)
-		// This ensures late-arriving users don't get their audio trimmed away
+		// Keep the end (most recent audio)
 		result = result[len(result)-expectedBytes:]
-		m.logger.Debug("Trimmed to keep most recent audio",
-			zap.String("user_id", stream.userID.String()),
-			zap.Int("trimmed_bytes", len(result)-expectedBytes))
 	} else if len(result) < expectedBytes {
-		// Pad with silence at the end
+		// Pad with silence
 		padding := make([]byte, expectedBytes-len(result))
 		result = append(result, padding...)
-		m.logger.Debug("Padded trailing silence",
-			zap.String("user_id", stream.userID.String()),
-			zap.Int("padding_bytes", len(padding)))
 	}
 
 	return result
 }
 
-// mixWithRMS performs RMS-weighted mixing to prevent clipping
-func (m *audioMixer) mixWithRMS(streams []*userStream, duration time.Duration, globalZeroRTP uint32) ([]byte, error) {
-	expectedSamples := int(duration.Nanoseconds() * int64(m.sampleRate) / int64(time.Second))
+func (m *audioMixer) mixMultipleStreams(streams []*userStream, duration time.Duration, globalEarliestRTP uint32) ([]byte, error) {
+	expectedSamples := int(duration.Seconds() * float64(m.sampleRate))
 
-	// Collect aligned audio from all streams
-	streamAudio := make(map[discord.UserID][]float32)
-	rmsValues := make(map[discord.UserID]float32)
-	totalRMS := float32(0.0)
-
-	for _, stream := range streams {
-		// Get aligned audio
-		audioBytes := m.getUserAudioAligned(stream, duration, globalZeroRTP)
-
-		// Convert to float32 for mixing
-		samples := m.bytesToFloat32(audioBytes)
-		streamAudio[stream.userID] = samples
-
-		// Calculate RMS for this stream
-		rms := m.calculateRMSFloat32(samples)
-		rmsValues[stream.userID] = rms
-		totalRMS += rms
+	// Extract audio from each stream
+	streamAudio := make([][]float32, len(streams))
+	for i, stream := range streams {
+		audioBytes := m.extractUserAudio(stream, duration, globalEarliestRTP)
+		streamAudio[i] = m.bytesToFloat32(audioBytes)
 	}
 
-	// Use RMS-aware dynamic mixing instead of simple averaging
-	// This preserves audio quality better for multiple speakers
+	// Mix using logarithmic algorithm
 	mixed := make([]float32, expectedSamples)
-	
-	// Calculate adaptive weight based on RMS levels to prevent over-quieting
-	// Instead of simple 1/N division, use RMS-weighted approach
-	var adaptiveWeight float32 = 1.0
-	if len(streams) > 1 {
-		// Use sqrt scaling instead of linear to preserve loudness better
-		// This prevents the "everyone sounds quiet" problem
-		adaptiveWeight = float32(math.Sqrt(1.0 / float64(len(streams))))
-		if adaptiveWeight < 0.5 {
-			adaptiveWeight = 0.5 // Minimum weight to keep audio audible
-		}
+	adaptiveWeight := float32(math.Sqrt(1.0 / float64(len(streams))))
+	if adaptiveWeight < 0.5 {
+		adaptiveWeight = 0.5
 	}
 
-	m.logger.Debug("Using RMS-aware dynamic mixing",
-		zap.Int("num_streams", len(streams)),
-		zap.Float32("adaptive_weight", adaptiveWeight),
-		zap.Float32("total_rms", totalRMS))
-
-	// Convert streamAudio map to slice for indexed access
-	streamSamples := make([][]float32, 0, len(streamAudio))
-	userIDs := make([]discord.UserID, 0, len(streamAudio))
-	for userID, samples := range streamAudio {
-		streamSamples = append(streamSamples, samples)
-		userIDs = append(userIDs, userID)
-		m.logger.Debug("Added stream to mix preparation",
-			zap.String("user_id", userID.String()),
-			zap.Float32("rms", rmsValues[userID]),
-			zap.Int("samples", len(samples)))
-	}
-
-	// Apply improved dynamic mixing with smarter peak limiting
 	for i := 0; i < expectedSamples; i++ {
-		// Sum all streams at index i first
 		sum := float32(0)
-		activeSampleCount := 0
-		for _, samples := range streamSamples {
+		activeCount := 0
+
+		for _, samples := range streamAudio {
 			if i < len(samples) {
 				sum += samples[i]
-				activeSampleCount++
+				activeCount++
 			}
 		}
 
-		// Apply adaptive weight based on actual active samples at this position
-		// This handles cases where streams have different lengths
-		var finalSample float32
-		if activeSampleCount > 0 {
-			// Calculate per-sample adaptive scaling
-			absSum := sum
-			if absSum < 0 {
-				absSum = -absSum
-			}
-
-			// Use gentler compression curve to prevent distortion
-			// Instead of hard limiting at 0.8, use a softer knee
-			var compressionScale float32 = 1.0
+		if activeCount > 0 {
+			// Apply adaptive weight and soft limiting
+			absSum := float32(math.Abs(float64(sum)))
+			compressionScale := float32(1.0)
+			
 			if absSum > 0.7 {
-				// Soft knee compression starting at 0.7, reaching 0.9 limit
-				compressionRatio := 0.9 / absSum
-				if compressionRatio < 0.7 {
-					compressionRatio = 0.7 // Don't over-compress
+				compressionScale = 0.9 / absSum
+				if compressionScale < 0.7 {
+					compressionScale = 0.7
 				}
-				compressionScale = compressionRatio
 			}
 
-			finalSample = sum * adaptiveWeight * compressionScale
-		} else {
-			finalSample = 0
-		}
-
-		mixed[i] = finalSample
-	}
-
-	// Convert back to bytes
-	result := m.float32ToBytes(mixed)
-
-	// Calculate final audio statistics for debugging
-	finalRMS := m.calculateRMSFloat32(mixed)
-	peakSample := float32(0)
-	for _, sample := range mixed {
-		abs := sample
-		if abs < 0 {
-			abs = -abs
-		}
-		if abs > peakSample {
-			peakSample = abs
+			mixed[i] = sum * adaptiveWeight * compressionScale
 		}
 	}
 
-	m.logger.Debug("Mixed audio with improved RMS-aware algorithm",
-		zap.Int("num_streams", len(streams)),
-		zap.Float32("input_total_rms", totalRMS),
-		zap.Float32("output_rms", finalRMS),
-		zap.Float32("output_peak", peakSample),
-		zap.Float32("adaptive_weight", adaptiveWeight),
-		zap.Int("output_size", len(result)))
-
-	// Log per-stream contribution for debugging multi-user issues
-	if len(streams) > 1 {
-		for userID, rms := range rmsValues {
-			contribution := rms / totalRMS * 100
-			m.logger.Debug("Stream mixing contribution",
-				zap.String("user_id", userID.String()),
-				zap.Float32("stream_rms", rms),
-				zap.Float32("contribution_percent", contribution))
-		}
-	}
-
-	return result, nil
+	return m.float32ToBytes(mixed), nil
 }
 
-// GetAllAvailableMixedAudio returns all available audio based on actual RTP timestamps
 func (m *audioMixer) GetAllAvailableMixedAudio() ([]byte, time.Duration, error) {
-	// Find the time range of actual audio packets we have
+	// Find time range of available audio
 	var earliestTime, latestTime time.Time
 	hasAudio := false
-	activeStreams := make([]*userStream, 0)
 
-	m.userStreams.Range(func(key, value any) bool {
+	m.streams.Range(func(key, value interface{}) bool {
 		stream := value.(*userStream)
-
-		stream.jitterBuffer.mu.Lock()
-		if len(stream.jitterBuffer.packets) == 0 {
-			stream.jitterBuffer.mu.Unlock()
-			return true
-		}
-
-		// Find earliest and latest packet times for this stream
-		for _, packet := range stream.jitterBuffer.packets {
+		stream.mu.RLock()
+		for _, packet := range stream.packets {
 			if !hasAudio {
 				earliestTime = packet.timestamp
 				latestTime = packet.timestamp
@@ -742,77 +402,114 @@ func (m *audioMixer) GetAllAvailableMixedAudio() ([]byte, time.Duration, error) 
 				}
 			}
 		}
-		stream.jitterBuffer.mu.Unlock()
-
-		activeStreams = append(activeStreams, stream)
+		stream.mu.RUnlock()
 		return true
 	})
 
-	if !hasAudio || len(activeStreams) == 0 {
+	if !hasAudio {
 		return []byte{}, 0, nil
 	}
 
-	// Calculate actual duration from packet timestamps
-	actualDuration := latestTime.Sub(earliestTime)
+	// Calculate duration
+	duration := latestTime.Sub(earliestTime) + 20*time.Millisecond
 
-	// Add one packet duration (20ms) to include the last packet
-	actualDuration += 20 * time.Millisecond
-
-	// Sanity check - cap at reasonable limits
-	const minDuration = 100 * time.Millisecond
-	const maxDuration = 30 * time.Second
-
-	if actualDuration < minDuration {
-		actualDuration = minDuration
-	} else if actualDuration > maxDuration {
-		m.logger.Warn("Capping audio duration to reasonable limit",
-			zap.Duration("calculated", actualDuration),
-			zap.Duration("capped", maxDuration))
-		actualDuration = maxDuration
+	// Sanity checks
+	if duration < 100*time.Millisecond {
+		duration = 100 * time.Millisecond
+	} else if duration > 30*time.Second {
+		duration = 30 * time.Second
 	}
 
-	m.logger.Debug("Determined audio duration from packet timestamps",
-		zap.Time("earliest", earliestTime),
-		zap.Time("latest", latestTime),
-		zap.Duration("duration", actualDuration),
-		zap.Int("active_streams", len(activeStreams)))
-
-	// Get mixed audio for this exact duration
-	mixedAudio, err := m.GetMixedAudio(actualDuration)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	m.logger.Debug("Mixed available audio",
-		zap.Duration("actual_duration", actualDuration),
-		zap.Int("output_size", len(mixedAudio)),
-		zap.Int("active_users", len(activeStreams)))
-
-	return mixedAudio, actualDuration, nil
+	// Get mixed audio
+	mixed, err := m.GetMixedAudio(duration)
+	return mixed, duration, err
 }
 
-// GetAllAvailableMixedAudioAndFlush gets all available mixed audio and immediately flushes buffers
 func (m *audioMixer) GetAllAvailableMixedAudioAndFlush() ([]byte, time.Duration, error) {
-	// Get all available audio
-	mixedAudio, duration, err := m.GetAllAvailableMixedAudio()
+	mixed, duration, err := m.GetAllAvailableMixedAudio()
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// Immediately flush all buffers
 	m.ClearAllBuffers()
-
-	// Reset baseTime to prevent huge offsets after flush
-	m.synchronizer.baseTime = time.Now()
-
-	m.logger.Debug("Got mixed audio and flushed all buffers",
-		zap.Duration("duration", duration),
-		zap.Int("audio_size", len(mixedAudio)))
-
-	return mixedAudio, duration, nil
+	return mixed, duration, nil
 }
 
-// bytesToFloat32 converts 16-bit PCM to normalized float32
+func (m *audioMixer) ClearUserBuffer(userID discord.UserID) {
+	m.streams.Delete(userID)
+}
+
+func (m *audioMixer) ClearAllBuffers() {
+	m.streams.Range(func(key, value interface{}) bool {
+		stream := value.(*userStream)
+		stream.mu.Lock()
+		stream.packets = make(map[uint16]*audioPacket)
+		stream.cumulativeEnergy = 0
+		stream.packetCount = 0
+		stream.mu.Unlock()
+		return true
+	})
+}
+
+func (m *audioMixer) GetDominantSpeaker() (discord.UserID, float32) {
+	var dominantUser discord.UserID
+	var maxCumulativeEnergy float64
+	var totalCumulativeEnergy float64
+	var activeUsers int
+
+	recentTime := time.Now().Add(-2 * time.Second)
+
+	m.streams.Range(func(key, value interface{}) bool {
+		stream := value.(*userStream)
+		stream.mu.RLock()
+		if stream.lastUpdate.After(recentTime) && stream.packetCount > 0 {
+			// Use cumulative energy to find who spoke the most overall
+			cumulativeEnergy := stream.cumulativeEnergy
+			
+			if cumulativeEnergy > maxCumulativeEnergy {
+				maxCumulativeEnergy = cumulativeEnergy
+				dominantUser = stream.userID
+			}
+			totalCumulativeEnergy += cumulativeEnergy
+			activeUsers++
+		}
+		stream.mu.RUnlock()
+		return true
+	})
+
+	confidence := float32(0.0)
+	if totalCumulativeEnergy > 0 && activeUsers > 1 {
+		// Confidence is the ratio of dominant speaker's cumulative energy to total cumulative energy
+		confidence = float32(maxCumulativeEnergy / totalCumulativeEnergy)
+	} else if activeUsers == 1 && maxCumulativeEnergy > 0 {
+		// Single speaker always has full confidence
+		confidence = 1.0
+	}
+
+	return dominantUser, confidence
+}
+
+func (m *audioMixer) calculateRMS(audio []byte) float32 {
+	if len(audio) < 2 {
+		return 0.0
+	}
+
+	var sum float64
+	sampleCount := len(audio) / 2
+
+	for i := 0; i < len(audio)-1; i += 2 {
+		sample := int16(uint16(audio[i]) | (uint16(audio[i+1]) << 8))
+		sampleFloat := float64(sample) / 32768.0
+		sum += sampleFloat * sampleFloat
+	}
+
+	if sampleCount == 0 {
+		return 0.0
+	}
+
+	return float32(math.Sqrt(sum / float64(sampleCount)))
+}
+
 func (m *audioMixer) bytesToFloat32(audio []byte) []float32 {
 	samples := make([]float32, len(audio)/2)
 	for i := 0; i+1 < len(audio); i += 2 {
@@ -822,11 +519,9 @@ func (m *audioMixer) bytesToFloat32(audio []byte) []float32 {
 	return samples
 }
 
-// float32ToBytes converts normalized float32 to 16-bit PCM
 func (m *audioMixer) float32ToBytes(samples []float32) []byte {
 	result := make([]byte, len(samples)*2)
 	for i, sample := range samples {
-		// Scale and clamp
 		scaled := sample * 32768.0
 		if scaled > 32767 {
 			scaled = 32767
@@ -839,153 +534,4 @@ func (m *audioMixer) float32ToBytes(samples []float32) []byte {
 		result[i*2+1] = byte(sample16 >> 8)
 	}
 	return result
-}
-
-// calculateRMSFloat32 calculates RMS from float32 samples
-func (m *audioMixer) calculateRMSFloat32(samples []float32) float32 {
-	if len(samples) == 0 {
-		return 0
-	}
-
-	sum := float32(0)
-	for _, s := range samples {
-		sum += s * s
-	}
-
-	return float32(math.Sqrt(float64(sum / float32(len(samples)))))
-}
-
-func (m *audioMixer) getDominantSpeakerAudio(duration time.Duration) ([]byte, error) {
-	dominantUser, _ := m.GetDominantSpeaker()
-	if dominantUser == 0 {
-		// Return silence
-		sampleCount := int(duration.Nanoseconds() * int64(m.sampleRate) / int64(time.Second))
-		return make([]byte, sampleCount*2), nil
-	}
-
-	// Find the stream
-	var dominantStream *userStream
-	m.userStreams.Range(func(key, value any) bool {
-		if key.(discord.UserID) == dominantUser {
-			dominantStream = value.(*userStream)
-			return false
-		}
-		return true
-	})
-
-	if dominantStream == nil {
-		sampleCount := int(duration.Nanoseconds() * int64(m.sampleRate) / int64(time.Second))
-		return make([]byte, sampleCount*2), nil
-	}
-
-	// Calculate global earliest RTP for this single stream
-	var globalEarliestRTP uint32 = math.MaxUint32
-	dominantStream.jitterBuffer.mu.Lock()
-	for _, pkt := range dominantStream.jitterBuffer.packets {
-		if pkt.rtpTimestamp < globalEarliestRTP {
-			globalEarliestRTP = pkt.rtpTimestamp
-		}
-	}
-	dominantStream.jitterBuffer.mu.Unlock()
-
-	return m.getUserAudioAligned(dominantStream, duration, globalEarliestRTP), nil
-}
-
-func (m *audioMixer) ClearUserBuffer(userID discord.UserID) {
-	m.userStreams.Delete(userID)
-	m.synchronizer.streamOffsets.Delete(userID)
-
-	m.logger.Debug("Cleared user buffer",
-		zap.String("user_id", userID.String()))
-}
-
-func (m *audioMixer) GetDominantSpeaker() (discord.UserID, float32) {
-	var dominantUser discord.UserID
-	var maxEnergy float32 = 0.0
-	var totalEnergy float32 = 0.0
-
-	recentTime := time.Now().Add(-2 * time.Second) // Consider last 2 seconds
-
-	m.userStreams.Range(func(key, value any) bool {
-		stream := value.(*userStream)
-		stream.mu.Lock()
-		if stream.lastUpdate.After(recentTime) {
-			energy := stream.energyLevel
-			totalEnergy += energy
-
-			if energy > maxEnergy {
-				maxEnergy = energy
-				dominantUser = stream.userID
-			}
-		}
-		stream.mu.Unlock()
-		return true
-	})
-
-	// Calculate confidence as percentage of total energy
-	confidence := float32(0.0)
-	if totalEnergy > 0 {
-		confidence = maxEnergy / totalEnergy
-	}
-
-	return dominantUser, confidence
-}
-
-// calculateRMS calculates RMS from PCM audio bytes
-func (m *audioMixer) calculateRMS(audio []byte) float32 {
-	if len(audio) < 2 {
-		return 0.0
-	}
-
-	var sum float64
-	sampleCount := len(audio) / 2
-
-	for i := 0; i < len(audio)-1; i += 2 {
-		// Convert little-endian 16-bit samples to float
-		sample := int16(uint16(audio[i]) | (uint16(audio[i+1]) << 8))
-		sampleFloat := float64(sample) / 32768.0 // Normalize to [-1, 1]
-		sum += sampleFloat * sampleFloat
-	}
-
-	if sampleCount == 0 {
-		return 0.0
-	}
-
-	rms := math.Sqrt(sum / float64(sampleCount))
-	return float32(rms)
-}
-
-// ClearAllBuffers clears all user buffers but preserves user metadata
-func (m *audioMixer) ClearAllBuffers() {
-	m.userStreams.Range(func(key, value any) bool {
-		stream := value.(*userStream)
-		stream.mu.Lock()
-		stream.jitterBuffer.mu.Lock()
-		stream.jitterBuffer.packets = make(map[uint16]*audioPacketData)
-		stream.jitterBuffer.mu.Unlock()
-		stream.mu.Unlock()
-		return true
-	})
-	m.logger.Debug("Cleared all mixer buffers")
-}
-
-// GetUserAudioForDebug returns user audio for debugging purposes
-func (m *audioMixer) GetUserAudioForDebug(userID discord.UserID, duration time.Duration) []byte {
-	streamInt, exists := m.userStreams.Load(userID)
-	if !exists {
-		return nil
-	}
-	stream := streamInt.(*userStream)
-
-	// Calculate global earliest RTP for this single stream
-	var globalEarliestRTP uint32 = math.MaxUint32
-	stream.jitterBuffer.mu.Lock()
-	for _, pkt := range stream.jitterBuffer.packets {
-		if pkt.rtpTimestamp < globalEarliestRTP {
-			globalEarliestRTP = pkt.rtpTimestamp
-		}
-	}
-	stream.jitterBuffer.mu.Unlock()
-
-	return m.getUserAudioAligned(stream, duration, globalEarliestRTP)
 }

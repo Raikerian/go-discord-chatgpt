@@ -37,9 +37,8 @@ type AudioPacket struct {
 	UserID       discord.UserID
 	SSRC         uint32
 	Opus         []byte
-	Timestamp    time.Time // Wall clock time when received
-	RTPTimestamp uint32    // RTP timestamp from packet
-	Sequence     uint16    // RTP sequence number
+	RTPTimestamp uint32 // RTP timestamp from packet
+	Sequence     uint16 // RTP sequence number
 }
 
 type discordVoiceManager struct {
@@ -239,7 +238,6 @@ func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID disc
 					UserID:       userID,
 					SSRC:         packet.SSRC(),
 					Opus:         packet.Opus,
-					Timestamp:    time.Now(),
 					RTPTimestamp: packet.Timestamp(),
 					Sequence:     packet.Sequence(),
 				}

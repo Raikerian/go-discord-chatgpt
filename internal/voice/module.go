@@ -1,6 +1,8 @@
 package voice
 
-import "go.uber.org/fx"
+import (
+	"go.uber.org/fx"
+)
 
 var Module = fx.Module("voice",
 	fx.Provide(
@@ -8,7 +10,7 @@ var Module = fx.Module("voice",
 		NewAudioProcessor,
 		NewRealtimeProvider,
 		NewSessionManager,
-		NewAudioMixer,
+		// audiomixer.NewAudioMixer,
 		NewService,
 	),
 )

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
+	"github.com/Raikerian/go-discord-chatgpt/pkg/audiomixer"
 	"github.com/Raikerian/go-discord-chatgpt/pkg/openai"
 
 	"github.com/diamondburned/arikawa/v3/discord"
@@ -28,7 +29,7 @@ type Service struct {
 	audioProcessor   AudioProcessor
 	realtimeProvider RealtimeProvider
 	sessionManager   SessionManager
-	audioMixer       AudioMixer
+	audioMixer       audiomixer.AudioMixer
 
 	// activeSessions stores currently active voice sessions by guild ID
 	activeSessions sync.Map // map[discord.GuildID]*VoiceSession
@@ -102,7 +103,7 @@ func NewService(
 	audioProcessor AudioProcessor,
 	realtimeProvider RealtimeProvider,
 	sessionManager SessionManager,
-	audioMixer AudioMixer,
+	audioMixer audiomixer.AudioMixer,
 ) *Service {
 	// Convert slices to maps for O(1) lookups
 	allowedUsersMap := make(map[string]struct{}, len(cfg.Voice.AllowedUserIDs))
@@ -430,7 +431,7 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 		zap.Int("pcm_size", len(pcm)))
 
 	// Add PCM audio to mixer with adjusted RTP timing info
-	s.audioMixer.AddUserAudioWithRTP(packet.UserID, pcm, adjustedRTP, packet.Sequence)
+	s.audioMixer.AddUserAudioWithRTP(uint64(packet.UserID), pcm, adjustedRTP, packet.Sequence)
 	s.sessionManager.UpdateActivity(session.GuildID)
 	s.sessionManager.UpdateAudioTime(session.GuildID)
 

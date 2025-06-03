@@ -25,7 +25,7 @@ type Service struct {
 	discordSession *session.Session
 	pricingService openai.PricingService
 
-	voiceManager     DiscordVoiceManager
+	voiceManager     DiscordManager
 	audioProcessor   AudioProcessor
 	realtimeProvider RealtimeProvider
 	sessionManager   SessionManager
@@ -99,7 +99,7 @@ func NewService(
 	cfg *config.Config,
 	session *session.Session,
 	pricingService openai.PricingService,
-	voiceManager DiscordVoiceManager,
+	voiceManager DiscordManager,
 	audioProcessor AudioProcessor,
 	realtimeProvider RealtimeProvider,
 	sessionManager SessionManager,
@@ -478,13 +478,13 @@ func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
 		zap.Duration("actual_duration", actualDuration),
 		zap.Int("audio_bytes", len(mixedAudio)))
 
-	// Use DetectSilence from audio processor to avoid sending silence
-	isSilent, energy := s.audioProcessor.DetectSilence(mixedAudio)
-	if isSilent {
-		s.logger.Debug("Mixed audio is silent, skipping send", zap.Float32("energy", energy))
+	// // Use DetectSilence from audio processor to avoid sending silence
+	// isSilent, energy := s.audioProcessor.DetectSilence(mixedAudio)
+	// if isSilent {
+	// 	s.logger.Debug("Mixed audio is silent, skipping send", zap.Float32("energy", energy))
 
-		return
-	}
+	// 	return
+	// }
 
 	s.logger.Debug("Mixed audio obtained",
 		zap.Int("size", len(mixedAudio)),

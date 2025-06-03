@@ -3,6 +3,7 @@ package voice
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/diamondburned/arikawa/v3/discord"
@@ -12,7 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type DiscordVoiceManager interface {
+type DiscordManager interface {
 	// Connect to a voice channel
 	JoinChannel(ctx context.Context, channelID discord.ChannelID) (*VoiceConnection, error)
 
@@ -33,34 +34,26 @@ type VoiceConnection struct {
 	Session     *voice.Session // Arikawa voice session
 }
 
-type AudioPacket struct {
-	UserID       discord.UserID
-	SSRC         uint32
-	Opus         []byte
-	RTPTimestamp uint32 // RTP timestamp from packet
-	Sequence     uint16 // RTP sequence number
-}
-
-type discordVoiceManager struct {
+type discordManager struct {
 	logger  *zap.Logger
 	session *session.Session
 
-	// activeConnections stores voice connections by channel ID
-	activeConnections map[discord.ChannelID]*VoiceConnection
+	activeConnections sync.Map // map[discord.ChannelID]*VoiceConnection
 }
 
-func NewDiscordVoiceManager(logger *zap.Logger, session *session.Session) DiscordVoiceManager {
-	return &discordVoiceManager{
-		logger:            logger,
-		session:           session,
-		activeConnections: make(map[discord.ChannelID]*VoiceConnection),
+func NewDiscordVoiceManager(logger *zap.Logger, session *session.Session) DiscordManager {
+	return &discordManager{
+		logger:  logger,
+		session: session,
 	}
 }
 
-func (m *discordVoiceManager) JoinChannel(ctx context.Context, channelID discord.ChannelID) (*VoiceConnection, error) {
-	// Check if already connected
-	if conn, exists := m.activeConnections[channelID]; exists {
-		return conn, nil
+func (m *discordManager) JoinChannel(ctx context.Context, channelID discord.ChannelID) (*VoiceConnection, error) {
+	// Check if already connected using sync.Map.Load
+	if value, exists := m.activeConnections.Load(channelID); exists {
+		if conn, ok := value.(*VoiceConnection); ok {
+			return conn, nil
+		}
 	}
 
 	// Get channel info to determine guild
@@ -113,7 +106,7 @@ func (m *discordVoiceManager) JoinChannel(ctx context.Context, channelID discord
 		Session:     voiceSession,
 	}
 
-	m.activeConnections[channelID] = conn
+	m.activeConnections.Store(channelID, conn)
 
 	m.logger.Info("Joined voice channel",
 		zap.String("channel_id", channelID.String()),
@@ -122,10 +115,15 @@ func (m *discordVoiceManager) JoinChannel(ctx context.Context, channelID discord
 	return conn, nil
 }
 
-func (m *discordVoiceManager) LeaveChannel(ctx context.Context, channelID discord.ChannelID) error {
-	conn, exists := m.activeConnections[channelID]
+func (m *discordManager) LeaveChannel(ctx context.Context, channelID discord.ChannelID) error {
+	value, exists := m.activeConnections.LoadAndDelete(channelID)
 	if !exists {
 		return nil // Already disconnected
+	}
+
+	conn, ok := value.(*VoiceConnection)
+	if !ok {
+		return nil // Invalid connection type, just return
 	}
 
 	// Leave the voice channel using arikawa
@@ -136,8 +134,6 @@ func (m *discordVoiceManager) LeaveChannel(ctx context.Context, channelID discor
 		}
 	}
 
-	delete(m.activeConnections, channelID)
-
 	m.logger.Info("Left voice channel",
 		zap.String("channel_id", channelID.String()),
 		zap.String("guild_id", conn.GuildID.String()))
@@ -145,10 +141,15 @@ func (m *discordVoiceManager) LeaveChannel(ctx context.Context, channelID discor
 	return nil
 }
 
-func (m *discordVoiceManager) PlayAudio(ctx context.Context, channelID discord.ChannelID, audio []byte) error {
-	conn, exists := m.activeConnections[channelID]
+func (m *discordManager) PlayAudio(ctx context.Context, channelID discord.ChannelID, audio []byte) error {
+	value, exists := m.activeConnections.Load(channelID)
 	if !exists {
 		return fmt.Errorf("not connected to voice channel %s", channelID)
+	}
+
+	conn, ok := value.(*VoiceConnection)
+	if !ok {
+		return fmt.Errorf("invalid connection type for channel %s", channelID)
 	}
 
 	if conn.Session == nil {
@@ -169,10 +170,15 @@ func (m *discordVoiceManager) PlayAudio(ctx context.Context, channelID discord.C
 	return nil
 }
 
-func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID discord.ChannelID) (<-chan *AudioPacket, error) {
-	conn, exists := m.activeConnections[channelID]
+func (m *discordManager) StartReceiving(ctx context.Context, channelID discord.ChannelID) (<-chan *AudioPacket, error) {
+	value, exists := m.activeConnections.Load(channelID)
 	if !exists {
 		return nil, fmt.Errorf("not connected to voice channel %s", channelID)
+	}
+
+	conn, ok := value.(*VoiceConnection)
+	if !ok {
+		return nil, fmt.Errorf("invalid connection type for channel %s", channelID)
 	}
 
 	if conn.Session == nil {
@@ -220,6 +226,7 @@ func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID disc
 				// For now, we'll use SSRC as a temporary identifier
 				// TODO: Implement proper SSRC to UserID mapping via voice gateway events
 				ssrc := packet.SSRC()
+				userID := discord.UserID(ssrc)
 
 				// Log packet reception for debugging
 				m.logger.Debug("Received audio packet",
@@ -229,18 +236,8 @@ func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID disc
 					zap.Uint16("sequence", packet.Sequence()),
 					zap.String("channel_id", channelID.String()))
 
-				// For now, we'll process all packets with a placeholder user ID
-				// This is temporary - proper user identification needs to be implemented
-				userID := discord.UserID(ssrc) // Temporary: use SSRC as user ID
-
 				// Convert arikawa voice packet to our AudioPacket format
-				audioPacket := &AudioPacket{
-					UserID:       userID,
-					SSRC:         packet.SSRC(),
-					Opus:         packet.Opus,
-					RTPTimestamp: packet.Timestamp(),
-					Sequence:     packet.Sequence(),
-				}
+				audioPacket := NewAudioPacket(userID, packet)
 
 				// Send packet to channel (non-blocking)
 				select {
@@ -251,7 +248,7 @@ func (m *discordVoiceManager) StartReceiving(ctx context.Context, channelID disc
 					return
 				default:
 					// Channel is full, drop packet
-					m.logger.Debug("Audio channel full, dropping packet",
+					m.logger.Warn("Audio channel full, dropping packet",
 						zap.String("user_id", userID.String()))
 				}
 			}

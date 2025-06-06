@@ -10,6 +10,7 @@ import (
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
 	"github.com/Raikerian/go-discord-chatgpt/pkg/audio"
 	"github.com/Raikerian/go-discord-chatgpt/pkg/openai"
+	"github.com/Raikerian/go-discord-chatgpt/pkg/util"
 
 	"github.com/diamondburned/arikawa/v3/discord"
 	"github.com/diamondburned/arikawa/v3/session"
@@ -276,6 +277,7 @@ func (s *Service) canStopSession(userID discord.UserID, session *VoiceSession) b
 	// The discord.Member struct in arikawa v3 doesn't have direct Permissions field
 	// We need to check roles and their permissions
 	// For now, only allow the initiator to stop the session
+	// For example, administrators and bot owners should always be able to stop the session
 	return false
 }
 
@@ -358,12 +360,10 @@ func (s *Service) setupAudioHandlers(ctx context.Context, session *VoiceSession)
 }
 
 func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audioChannel <-chan *AudioPacket) {
-	var lastPacketTime = time.Now() // Initialize to prevent initial commit
-	// Use a shorter timeout for more responsive audio processing
-	timeoutDuration := 200 * time.Millisecond // 200ms of no packets = commit audio
-
-	audioTimeoutTicker := time.NewTicker(100 * time.Millisecond) // Check every 100ms
-	defer audioTimeoutTicker.Stop()
+	// Use a debouncer for clean timeout handling
+	const timeoutDuration = 200 * time.Millisecond
+	debouncer := util.NewDebouncer(timeoutDuration)
+	defer debouncer.Stop()
 
 	s.logger.Info("Started audio processing loop",
 		zap.String("guild_id", session.GuildID.String()),
@@ -374,27 +374,18 @@ func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audio
 		case packet, ok := <-audioChannel:
 			if !ok || packet == nil {
 				s.logger.Debug("Audio channel closed, exiting processAudio")
-
 				return
 			}
 
 			s.processAudioPacket(session, packet)
-			lastPacketTime = time.Now()
+			debouncer.Reset()
 
-		case <-audioTimeoutTicker.C:
-			// Check if we haven't received packets for the timeout duration
-			if !lastPacketTime.IsZero() && time.Since(lastPacketTime) > timeoutDuration {
-				s.logger.Info("Audio timeout reached, committing audio",
-					zap.Duration("since_last_packet", time.Since(lastPacketTime)))
-
-				// Commit audio from mixer
-				s.commitMixerAudio(ctx, session)
-				lastPacketTime = time.Time{} // Reset to prevent multiple commits
-			}
+		case <-debouncer.C():
+			s.logger.Info("Audio timeout reached, committing audio")
+			s.commitMixerAudio(ctx, session)
 
 		case <-ctx.Done():
 			s.endSession(ctx, session, "context canceled")
-
 			return
 		}
 	}

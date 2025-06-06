@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,8 +13,8 @@ import (
 )
 
 type SessionManager interface {
-	// Create new session
-	CreateSession(guildID discord.GuildID, channelID discord.ChannelID, initiatorID discord.UserID) (*VoiceSession, error)
+	// Create new session with full session data
+	CreateSession(guildID discord.GuildID, channelID discord.ChannelID, textChannelID discord.ChannelID, initiatorID discord.UserID, model string) (*VoiceSession, error)
 
 	// Get active session by guild
 	GetSessionByGuild(guildID discord.GuildID) (*VoiceSession, error)
@@ -27,6 +28,9 @@ type SessionManager interface {
 	// Get all active sessions
 	GetActiveSessions() map[discord.GuildID]*VoiceSession
 
+	// Get current session count
+	GetSessionCount() int
+
 	// Update session cost
 	UpdateSessionCost(guildID discord.GuildID, cost float64) error
 
@@ -35,6 +39,15 @@ type SessionManager interface {
 
 	// Update token usage
 	UpdateTokenUsage(guildID discord.GuildID, inputTokens, outputTokens int) error
+
+	// Set session connection
+	SetConnection(guildID discord.GuildID, connection any) error
+
+	// Set cancel function
+	SetCancelFunc(guildID discord.GuildID, cancelFunc context.CancelFunc) error
+
+	// Update session state
+	UpdateSessionState(guildID discord.GuildID, state SessionState) error
 }
 
 type sessionManager struct {
@@ -51,7 +64,7 @@ func NewSessionManager(logger *zap.Logger, cfg *config.Config) SessionManager {
 	}
 }
 
-func (sm *sessionManager) CreateSession(guildID discord.GuildID, channelID discord.ChannelID, initiatorID discord.UserID) (*VoiceSession, error) {
+func (sm *sessionManager) CreateSession(guildID discord.GuildID, channelID, textChannelID discord.ChannelID, initiatorID discord.UserID, model string) (*VoiceSession, error) {
 	// Check if session already exists
 	if _, exists := sm.sessions.Load(guildID); exists {
 		return nil, ErrSessionAlreadyExists
@@ -64,14 +77,19 @@ func (sm *sessionManager) CreateSession(guildID discord.GuildID, channelID disco
 
 	// Create new session
 	session := &VoiceSession{
-		GuildID:       guildID,
-		ChannelID:     channelID,
-		InitiatorID:   initiatorID,
-		StartTime:     time.Now(),
-		LastActivity:  time.Now(),
-		LastAudioTime: time.Now(),
-		State:         SessionStateStarting,
-		ActiveUsers:   make(map[discord.UserID]*UserState),
+		GuildID:        guildID,
+		ChannelID:      channelID,
+		TextChannelID:  textChannelID,
+		InitiatorID:    initiatorID,
+		StartTime:      time.Now(),
+		LastActivity:   time.Now(),
+		LastAudioTime:  time.Now(),
+		State:          SessionStateStarting,
+		ActiveUsers:    make(map[discord.UserID]*UserState),
+		AudioQueue:     make(chan []byte, 100), // Buffer up to 100 audio chunks
+		PlaybackActive: false,
+		Model:          model,
+		LastCostUpdate: time.Now(),
 	}
 
 	// Use LoadOrStore to handle race condition
@@ -155,6 +173,10 @@ func (sm *sessionManager) GetActiveSessions() map[discord.GuildID]*VoiceSession 
 	return sessions
 }
 
+func (sm *sessionManager) GetSessionCount() int {
+	return int(atomic.LoadInt64(&sm.sessionCount))
+}
+
 // Helper methods for session state management
 
 func (sm *sessionManager) UpdateSessionCost(guildID discord.GuildID, cost float64) error {
@@ -192,6 +214,42 @@ func (sm *sessionManager) UpdateTokenUsage(guildID discord.GuildID, inputTokens,
 	session := value.(*VoiceSession)
 	session.InputAudioTokens += inputTokens
 	session.OutputAudioTokens += outputTokens
+
+	return nil
+}
+
+func (sm *sessionManager) SetConnection(guildID discord.GuildID, connection any) error {
+	value, exists := sm.sessions.Load(guildID)
+	if !exists {
+		return ErrSessionNotFound
+	}
+
+	session := value.(*VoiceSession)
+	session.Connection = connection
+
+	return nil
+}
+
+func (sm *sessionManager) SetCancelFunc(guildID discord.GuildID, cancelFunc context.CancelFunc) error {
+	value, exists := sm.sessions.Load(guildID)
+	if !exists {
+		return ErrSessionNotFound
+	}
+
+	session := value.(*VoiceSession)
+	session.CancelFunc = cancelFunc
+
+	return nil
+}
+
+func (sm *sessionManager) UpdateSessionState(guildID discord.GuildID, state SessionState) error {
+	value, exists := sm.sessions.Load(guildID)
+	if !exists {
+		return ErrSessionNotFound
+	}
+
+	session := value.(*VoiceSession)
+	session.State = state
 
 	return nil
 }

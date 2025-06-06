@@ -1,8 +1,8 @@
 package voice
 
 import (
-	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/diamondburned/arikawa/v3/discord"
@@ -38,31 +38,27 @@ type SessionManager interface {
 }
 
 type sessionManager struct {
-	logger   *zap.Logger
-	cfg      *config.VoiceConfig
-	sessions map[discord.GuildID]*VoiceSession
-	mu       sync.RWMutex
+	logger       *zap.Logger
+	cfg          *config.VoiceConfig
+	sessions     sync.Map // map[discord.GuildID]*VoiceSession
+	sessionCount int64    // atomic counter for active sessions
 }
 
 func NewSessionManager(logger *zap.Logger, cfg *config.Config) SessionManager {
 	return &sessionManager{
-		logger:   logger,
-		cfg:      &cfg.Voice,
-		sessions: make(map[discord.GuildID]*VoiceSession),
+		logger: logger,
+		cfg:    &cfg.Voice,
 	}
 }
 
 func (sm *sessionManager) CreateSession(guildID discord.GuildID, channelID discord.ChannelID, initiatorID discord.UserID) (*VoiceSession, error) {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
 	// Check if session already exists
-	if _, exists := sm.sessions[guildID]; exists {
+	if _, exists := sm.sessions.Load(guildID); exists {
 		return nil, ErrSessionAlreadyExists
 	}
 
 	// Check session limit
-	if len(sm.sessions) >= sm.cfg.MaxConcurrentSessions {
+	if atomic.LoadInt64(&sm.sessionCount) >= int64(sm.cfg.MaxConcurrentSessions) {
 		return nil, ErrMaxSessionsReached
 	}
 
@@ -78,7 +74,13 @@ func (sm *sessionManager) CreateSession(guildID discord.GuildID, channelID disco
 		ActiveUsers:   make(map[discord.UserID]*UserState),
 	}
 
-	sm.sessions[guildID] = session
+	// Use LoadOrStore to handle race condition
+	if _, loaded := sm.sessions.LoadOrStore(guildID, session); loaded {
+		return nil, ErrSessionAlreadyExists
+	}
+
+	// Increment session counter
+	atomic.AddInt64(&sm.sessionCount, 1)
 
 	sm.logger.Info("Voice session created",
 		zap.String("guild_id", guildID.String()),
@@ -89,26 +91,23 @@ func (sm *sessionManager) CreateSession(guildID discord.GuildID, channelID disco
 }
 
 func (sm *sessionManager) GetSessionByGuild(guildID discord.GuildID) (*VoiceSession, error) {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	session, exists := sm.sessions[guildID]
+	value, exists := sm.sessions.Load(guildID)
 	if !exists {
 		return nil, ErrSessionNotFound
 	}
+
+	session := value.(*VoiceSession)
 
 	return session, nil
 }
 
 func (sm *sessionManager) UpdateActivity(guildID discord.GuildID) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	session, exists := sm.sessions[guildID]
+	value, exists := sm.sessions.Load(guildID)
 	if !exists {
 		return ErrSessionNotFound
 	}
 
+	session := value.(*VoiceSession)
 	session.LastActivity = time.Now()
 
 	sm.logger.Debug("Session activity updated",
@@ -118,19 +117,18 @@ func (sm *sessionManager) UpdateActivity(guildID discord.GuildID) error {
 }
 
 func (sm *sessionManager) EndSession(guildID discord.GuildID) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	session, exists := sm.sessions[guildID]
+	value, exists := sm.sessions.LoadAndDelete(guildID)
 	if !exists {
 		return ErrSessionNotFound
 	}
 
+	session := value.(*VoiceSession)
+
 	// Mark session as ended
 	session.State = SessionStateEnded
 
-	// Remove from active sessions
-	delete(sm.sessions, guildID)
+	// Decrement session counter
+	atomic.AddInt64(&sm.sessionCount, -1)
 
 	sessionDuration := time.Since(session.StartTime)
 
@@ -144,12 +142,15 @@ func (sm *sessionManager) EndSession(guildID discord.GuildID) error {
 }
 
 func (sm *sessionManager) GetActiveSessions() map[discord.GuildID]*VoiceSession {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-
-	// Return a copy to avoid concurrent access issues
 	sessions := make(map[discord.GuildID]*VoiceSession)
-	maps.Copy(sessions, sm.sessions)
+
+	sm.sessions.Range(func(key, value interface{}) bool {
+		guildID := key.(discord.GuildID)
+		session := value.(*VoiceSession)
+		sessions[guildID] = session
+
+		return true
+	})
 
 	return sessions
 }
@@ -157,14 +158,12 @@ func (sm *sessionManager) GetActiveSessions() map[discord.GuildID]*VoiceSession 
 // Helper methods for session state management
 
 func (sm *sessionManager) UpdateSessionCost(guildID discord.GuildID, cost float64) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	session, exists := sm.sessions[guildID]
+	value, exists := sm.sessions.Load(guildID)
 	if !exists {
 		return ErrSessionNotFound
 	}
 
+	session := value.(*VoiceSession)
 	session.SessionCost = cost
 	session.LastCostUpdate = time.Now()
 
@@ -172,14 +171,12 @@ func (sm *sessionManager) UpdateSessionCost(guildID discord.GuildID, cost float6
 }
 
 func (sm *sessionManager) UpdateAudioTime(guildID discord.GuildID) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	session, exists := sm.sessions[guildID]
+	value, exists := sm.sessions.Load(guildID)
 	if !exists {
 		return ErrSessionNotFound
 	}
 
+	session := value.(*VoiceSession)
 	session.LastAudioTime = time.Now()
 	session.LastActivity = time.Now()
 
@@ -187,14 +184,12 @@ func (sm *sessionManager) UpdateAudioTime(guildID discord.GuildID) error {
 }
 
 func (sm *sessionManager) UpdateTokenUsage(guildID discord.GuildID, inputTokens, outputTokens int) error {
-	sm.mu.Lock()
-	defer sm.mu.Unlock()
-
-	session, exists := sm.sessions[guildID]
+	value, exists := sm.sessions.Load(guildID)
 	if !exists {
 		return ErrSessionNotFound
 	}
 
+	session := value.(*VoiceSession)
 	session.InputAudioTokens += inputTokens
 	session.OutputAudioTokens += outputTokens
 

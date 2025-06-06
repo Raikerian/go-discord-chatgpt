@@ -41,10 +41,10 @@ type discordManager struct {
 	activeConnections sync.Map // map[discord.ChannelID]*VoiceConnection
 }
 
-func NewDiscordVoiceManager(logger *zap.Logger, session *session.Session) DiscordManager {
+func NewDiscordVoiceManager(logger *zap.Logger, sess *session.Session) DiscordManager {
 	return &discordManager{
 		logger:  logger,
-		session: session,
+		session: sess,
 	}
 }
 

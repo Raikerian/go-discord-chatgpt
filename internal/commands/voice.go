@@ -31,15 +31,15 @@ func NewVoiceCommand(
 	logger *zap.Logger,
 	cfg *config.Config,
 	voiceService *voice.Service,
-	session *session.Session,
-	state *state.State,
+	sess *session.Session,
+	st *state.State,
 ) Command {
 	return &VoiceCommand{
 		logger:       logger,
 		cfg:          cfg,
 		voiceService: voiceService,
-		session:      session,
-		state:        state,
+		session:      sess,
+		state:        st,
 	}
 }
 
@@ -140,7 +140,7 @@ func (c *VoiceCommand) handleStart(ctx context.Context, s *session.Session, e *g
 
 	// Start voice session asynchronously to avoid blocking the interaction response
 	go func() {
-		session, err := c.voiceService.Start(ctx, guildID, voiceChannelID, textChannelID, userID, model)
+		voiceSession, err := c.voiceService.Start(ctx, guildID, voiceChannelID, textChannelID, userID, model)
 		if err != nil {
 			c.logger.Error("Failed to start voice session",
 				zap.Error(err),
@@ -157,7 +157,7 @@ func (c *VoiceCommand) handleStart(ctx context.Context, s *session.Session, e *g
 			return
 		}
 
-		usedModel := session.Model
+		usedModel := voiceSession.Model
 		if usedModel == "" {
 			usedModel = c.cfg.Voice.DefaultModel
 		}
@@ -316,7 +316,7 @@ func (c *VoiceCommand) getUserVoiceChannelFallback(_ *session.Session, guildID d
 	return 0, errors.New("user is not currently in a voice channel")
 }
 
-func (c *VoiceCommand) respondError(s *session.Session, interactionID discord.InteractionID, token string, message string) error {
+func (c *VoiceCommand) respondError(s *session.Session, interactionID discord.InteractionID, token, message string) error {
 	resp := api.InteractionResponse{
 		Type: api.MessageInteractionWithSource,
 		Data: &api.InteractionResponseData{

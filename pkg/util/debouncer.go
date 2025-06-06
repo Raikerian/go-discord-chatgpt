@@ -1,3 +1,4 @@
+// Package util provides utility functions and helpers for the Discord bot.
 package util
 
 import (

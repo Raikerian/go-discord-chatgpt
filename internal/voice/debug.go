@@ -1,3 +1,4 @@
+// Package voice provides Discord voice channel functionality including audio streaming and real-time transcription.
 package voice
 
 import (
@@ -26,13 +27,16 @@ func (s *Service) saveDebugWAV(samples []int16, sampleRate int,
 
 	// 1.  Prepare output directory & filename.
 	const debugDir = "debug_audio"
-	if err := os.MkdirAll(debugDir, 0o755); err != nil {
+	if err := os.MkdirAll(debugDir, 0o750); err != nil {
 		return fmt.Errorf("debug dir: %w", err)
 	}
+	// Sanitize filename components to prevent path injection
+	safePrefix := filepath.Base(prefix)
+	safeGuildID := filepath.Base(guildID.String())
 	filename := filepath.Join(
 		debugDir,
 		fmt.Sprintf("%s_audio_%s_%s.wav",
-			prefix, guildID.String(), time.Now().Format("20060102_150405")),
+			safePrefix, safeGuildID, time.Now().Format("20060102_150405")),
 	)
 
 	// 2.  Convert int16 → little-endian bytes.
@@ -43,8 +47,14 @@ func (s *Service) saveDebugWAV(samples []int16, sampleRate int,
 		numChannels   = 1
 		bitsPerSample = 16
 	)
+	if sampleRate < 0 || sampleRate > 0x7FFFFFFF/numChannels/bitsPerSample*8 {
+		return errors.New("sample rate too large")
+	}
 	byteRate := sampleRate * numChannels * bitsPerSample / 8
 	blockAlign := numChannels * bitsPerSample / 8
+	if len(pcmBytes) > 0xFFFFFFFF {
+		return errors.New("PCM data too large for WAV format")
+	}
 	dataSize := uint32(len(pcmBytes))
 	fileSize := dataSize + 36 // header = 44 bytes, RIFF size = fileSize+8-12
 	// 4.  Write file.
@@ -52,7 +62,11 @@ func (s *Service) saveDebugWAV(samples []int16, sampleRate int,
 	if err != nil {
 		return fmt.Errorf("create wav: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			s.logger.Error("failed to close debug WAV file", zap.Error(closeErr))
+		}
+	}()
 
 	write := func(v interface{}) error {
 		return binary.Write(file, binary.LittleEndian, v)

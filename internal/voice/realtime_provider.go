@@ -143,7 +143,9 @@ func (p *openAIRealtimeProvider) Connect(ctx context.Context, model string) (*Re
 
 	err = p.ConfigureSession(sessionConfig)
 	if err != nil {
-		p.Close()
+		if closeErr := p.Close(); closeErr != nil {
+			p.logger.Error("failed to close provider", zap.Error(closeErr))
+		}
 
 		return nil, fmt.Errorf("failed to configure session: %w", err)
 	}
@@ -209,21 +211,21 @@ func (p *openAIRealtimeProvider) SetResponseHandlers(handlers ResponseHandlers) 
 	return nil
 }
 
-func (p *openAIRealtimeProvider) ConfigureSession(config SessionConfig) error {
+func (p *openAIRealtimeProvider) ConfigureSession(sessionConfig SessionConfig) error {
 	if p.connection == nil || !p.connection.Connected {
 		return errors.New("not connected to OpenAI Realtime API")
 	}
 
 	p.logger.Info("Configuring OpenAI session",
-		zap.Strings("modalities", config.Modalities),
-		zap.String("voice", config.Voice),
-		zap.String("output_format", config.OutputAudioFormat),
-		zap.Bool("transcription", config.InputAudioTranscription),
-		zap.String("vad_mode", config.VADMode))
+		zap.Strings("modalities", sessionConfig.Modalities),
+		zap.String("voice", sessionConfig.Voice),
+		zap.String("output_format", sessionConfig.OutputAudioFormat),
+		zap.Bool("transcription", sessionConfig.InputAudioTranscription),
+		zap.String("vad_mode", sessionConfig.VADMode))
 
 	// Convert our config to the library's format
-	modalities := make([]openairt.Modality, len(config.Modalities))
-	for i, mod := range config.Modalities {
+	modalities := make([]openairt.Modality, len(sessionConfig.Modalities))
+	for i, mod := range sessionConfig.Modalities {
 		switch mod {
 		case "text":
 			modalities[i] = openairt.ModalityText
@@ -234,7 +236,7 @@ func (p *openAIRealtimeProvider) ConfigureSession(config SessionConfig) error {
 
 	// Convert voice profile
 	var voice openairt.Voice
-	switch config.Voice {
+	switch sessionConfig.Voice {
 	case "shimmer":
 		voice = openairt.VoiceShimmer
 	case "alloy":
@@ -258,7 +260,7 @@ func (p *openAIRealtimeProvider) ConfigureSession(config SessionConfig) error {
 	}
 
 	// Configure VAD mode if not using server VAD
-	if config.VADMode != "server_vad" {
+	if sessionConfig.VADMode != "server_vad" {
 		sessionUpdate.Session.TurnDetection = nil // Disable server-side turn detection
 	}
 

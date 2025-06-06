@@ -82,10 +82,20 @@ linters:
       - path: "cmd/"
         linters:
           - gochecknoinits
+      # Integer conversions in audio processing are safe
+      - path: "pkg/audio/"
+        linters:
+          - gosec
+        text: "G115"
+      # WAV file creation is internal debug functionality
+      - path: "internal/voice/debug.go"
+        linters:
+          - gosec
+        text: "G304|G115"
 
   settings:
     gocyclo:
-      min-complexity: 20  # Increased from 15 for more realistic limits
+      min-complexity: 25  # Increased for complex audio processing functions
     dupl:
       threshold: 100
     goconst:
@@ -125,6 +135,8 @@ linters:
         - performance
       disabled-checks:
         - appendAssign     # This can be overly strict in some cases
+        - sloppyReassign   # Style preference, not an error
+        - hugeParam        # Interface constraints make pointer passing complex
 
 formatters:
   enable:

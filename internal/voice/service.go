@@ -95,7 +95,7 @@ type SessionStatus struct {
 func NewService(
 	logger *zap.Logger,
 	cfg *config.Config,
-	session *session.Session,
+	sess *session.Session,
 	pricingService openai.PricingService,
 	voiceManager DiscordManager,
 	audioProcessor audio.AudioProcessor,
@@ -117,7 +117,7 @@ func NewService(
 	s := &Service{
 		logger:           logger,
 		cfg:              &cfg.Voice,
-		discordSession:   session,
+		discordSession:   sess,
 		pricingService:   pricingService,
 		voiceManager:     voiceManager,
 		audioProcessor:   audioProcessor,
@@ -136,7 +136,7 @@ func NewService(
 	return s
 }
 
-func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID discord.ChannelID, textChannelID discord.ChannelID, initiatorID discord.UserID, model string) (*VoiceSession, error) {
+func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID, textChannelID discord.ChannelID, initiatorID discord.UserID, model string) (*VoiceSession, error) {
 	// Check if session already exists for this guild
 	if _, exists := s.activeSessions.Load(guildID); exists {
 		return nil, errors.New("voice session already active in this guild")
@@ -164,7 +164,7 @@ func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID 
 	}
 
 	// Create session
-	session := &VoiceSession{
+	voiceSession := &VoiceSession{
 		GuildID:        guildID,
 		ChannelID:      channelID,
 		TextChannelID:  textChannelID,
@@ -181,7 +181,7 @@ func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID 
 	}
 
 	// Store session
-	s.activeSessions.Store(guildID, session)
+	s.activeSessions.Store(guildID, voiceSession)
 
 	// Join voice channel
 	_, err := s.voiceManager.JoinChannel(ctx, channelID)
@@ -194,28 +194,30 @@ func (s *Service) Start(ctx context.Context, guildID discord.GuildID, channelID 
 	// Connect to OpenAI Realtime
 	connection, err := s.realtimeProvider.Connect(ctx, model)
 	if err != nil {
-		s.voiceManager.LeaveChannel(ctx, channelID)
+		if leaveErr := s.voiceManager.LeaveChannel(ctx, channelID); leaveErr != nil {
+			s.logger.Error("failed to leave voice channel", zap.Error(leaveErr))
+		}
 		s.activeSessions.Delete(guildID)
 
 		return nil, fmt.Errorf("failed to connect to OpenAI Realtime: %w", err)
 	}
 
-	session.Connection = connection
-	session.State = SessionStateActive
+	voiceSession.Connection = connection
+	voiceSession.State = SessionStateActive
 
 	// Create session context for cancellation
 	sessionCtx, sessionCancel := context.WithCancel(ctx)
-	session.CancelFunc = sessionCancel
+	voiceSession.CancelFunc = sessionCancel
 
 	// Start audio processing loop
-	go s.processAudio(sessionCtx, session)
+	go s.processAudio(sessionCtx, voiceSession)
 
 	s.logger.Info("Voice session started",
 		zap.String("guild_id", guildID.String()),
 		zap.String("channel_id", channelID.String()),
 		zap.String("model", model))
 
-	return session, nil
+	return voiceSession, nil
 }
 
 func (s *Service) Stop(ctx context.Context, guildID discord.GuildID, userID discord.UserID) error {
@@ -224,14 +226,14 @@ func (s *Service) Stop(ctx context.Context, guildID discord.GuildID, userID disc
 		return errors.New("no active voice session in this guild")
 	}
 
-	session := sessionInterface.(*VoiceSession)
+	voiceSession := sessionInterface.(*VoiceSession)
 
 	// Check permissions
-	if !s.canStopSession(userID, session) {
+	if !s.canStopSession(userID, voiceSession) {
 		return errors.New("user does not have permission to stop this session")
 	}
 
-	return s.endSession(ctx, session, "stopped by user")
+	return s.endSession(ctx, voiceSession, "stopped by user")
 }
 
 func (s *Service) GetStatus(guildID discord.GuildID) (*SessionStatus, error) {
@@ -240,24 +242,24 @@ func (s *Service) GetStatus(guildID discord.GuildID) (*SessionStatus, error) {
 		return &SessionStatus{Active: false}, nil
 	}
 
-	session := sessionInterface.(*VoiceSession)
+	voiceSession := sessionInterface.(*VoiceSession)
 
-	session.mu.Lock()
-	activeUsers := make([]discord.UserID, 0, len(session.ActiveUsers))
-	for userID := range session.ActiveUsers {
+	voiceSession.mu.Lock()
+	activeUsers := make([]discord.UserID, 0, len(voiceSession.ActiveUsers))
+	for userID := range voiceSession.ActiveUsers {
 		activeUsers = append(activeUsers, userID)
 	}
 
 	status := &SessionStatus{
 		Active:      true,
-		GuildID:     session.GuildID,
-		ChannelID:   session.ChannelID,
-		StartTime:   session.StartTime,
+		GuildID:     voiceSession.GuildID,
+		ChannelID:   voiceSession.ChannelID,
+		StartTime:   voiceSession.StartTime,
 		ActiveUsers: activeUsers,
-		SessionCost: session.SessionCost,
-		Model:       session.Model,
+		SessionCost: voiceSession.SessionCost,
+		Model:       voiceSession.Model,
 	}
-	session.mu.Unlock()
+	voiceSession.mu.Unlock()
 
 	return status, nil
 }
@@ -267,9 +269,9 @@ func (s *Service) canExecuteCommand(userID discord.UserID) bool {
 	return s.isAllowedUser(userID)
 }
 
-func (s *Service) canStopSession(userID discord.UserID, session *VoiceSession) bool {
+func (s *Service) canStopSession(userID discord.UserID, voiceSession *VoiceSession) bool {
 	// Check if user is initiator
-	if session.InitiatorID == userID {
+	if voiceSession.InitiatorID == userID {
 		return true
 	}
 
@@ -313,35 +315,37 @@ func (s *Service) getActiveSessionCount() int {
 	return count
 }
 
-func (s *Service) processAudio(ctx context.Context, session *VoiceSession) {
-	if err := s.setupAudioHandlers(ctx, session); err != nil {
+func (s *Service) processAudio(ctx context.Context, voiceSession *VoiceSession) {
+	if err := s.setupAudioHandlers(ctx, voiceSession); err != nil {
 		return
 	}
 
-	audioChannel, err := s.voiceManager.StartReceiving(ctx, session.ChannelID)
+	audioChannel, err := s.voiceManager.StartReceiving(ctx, voiceSession.ChannelID)
 	if err != nil {
 		s.logger.Error("Failed to start receiving audio", zap.Error(err))
-		s.endSession(ctx, session, fmt.Sprintf("failed to start receiving audio: %v", err))
+		if endErr := s.endSession(ctx, voiceSession, fmt.Sprintf("failed to start receiving audio: %v", err)); endErr != nil {
+			s.logger.Error("failed to end session", zap.Error(endErr))
+		}
 
 		return
 	}
 
-	s.runAudioLoop(ctx, session, audioChannel)
+	s.runAudioLoop(ctx, voiceSession, audioChannel)
 }
 
-func (s *Service) setupAudioHandlers(ctx context.Context, session *VoiceSession) error {
+func (s *Service) setupAudioHandlers(ctx context.Context, voiceSession *VoiceSession) error {
 	handlers := ResponseHandlers{
 		OnAudioDelta: func(ctx context.Context, audioData []byte) {
-			s.handleAudioResponse(ctx, session, audioData)
+			s.handleAudioResponse(ctx, voiceSession, audioData)
 		},
 		OnTranscript: func(ctx context.Context, transcript string) {
-			s.handleTranscript(session, transcript)
+			s.handleTranscript(voiceSession, transcript)
 		},
 		OnUserTranscript: func(ctx context.Context, transcript string) {
-			s.handleUserTranscript(session, transcript)
+			s.handleUserTranscript(voiceSession, transcript)
 		},
 		OnResponseDone: func(ctx context.Context, usage *Usage) {
-			s.handleResponseDone(ctx, session, usage)
+			s.handleResponseDone(ctx, voiceSession, usage)
 		},
 		OnError: func(ctx context.Context, err error) {
 			s.logger.Error("OpenAI Realtime error", zap.Error(err))
@@ -351,7 +355,9 @@ func (s *Service) setupAudioHandlers(ctx context.Context, session *VoiceSession)
 	err := s.realtimeProvider.SetResponseHandlers(handlers)
 	if err != nil {
 		s.logger.Error("Failed to set response handlers", zap.Error(err))
-		s.endSession(ctx, session, fmt.Sprintf("failed to set response handlers: %v", err))
+		if endErr := s.endSession(ctx, voiceSession, fmt.Sprintf("failed to set response handlers: %v", err)); endErr != nil {
+			s.logger.Error("failed to end session", zap.Error(endErr))
+		}
 
 		return err
 	}
@@ -359,14 +365,14 @@ func (s *Service) setupAudioHandlers(ctx context.Context, session *VoiceSession)
 	return nil
 }
 
-func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audioChannel <-chan *AudioPacket) {
+func (s *Service) runAudioLoop(ctx context.Context, voiceSession *VoiceSession, audioChannel <-chan *AudioPacket) {
 	// Use a debouncer for clean timeout handling
 	timeoutDuration := time.Duration(s.cfg.SilenceDuration) * time.Millisecond
 	debouncer := util.NewDebouncer(timeoutDuration)
 	defer debouncer.Stop()
 
 	s.logger.Info("Started audio processing loop",
-		zap.String("guild_id", session.GuildID.String()),
+		zap.String("guild_id", voiceSession.GuildID.String()),
 		zap.Duration("timeout_duration", timeoutDuration))
 
 	for {
@@ -378,22 +384,24 @@ func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audio
 				return
 			}
 
-			s.processAudioPacket(session, packet)
+			s.processAudioPacket(voiceSession, packet)
 			debouncer.Reset()
 
 		case <-debouncer.C():
 			s.logger.Info("Audio timeout reached, committing audio")
-			s.commitMixerAudio(ctx, session)
+			s.commitMixerAudio(ctx, voiceSession)
 
 		case <-ctx.Done():
-			s.endSession(ctx, session, "context canceled")
+			if err := s.endSession(ctx, voiceSession, "context canceled"); err != nil {
+				s.logger.Error("failed to end session", zap.Error(err))
+			}
 
 			return
 		}
 	}
 }
 
-func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket) {
+func (s *Service) processAudioPacket(voiceSession *VoiceSession, packet *AudioPacket) {
 	s.logger.Debug("Processing audio packet",
 		zap.String("user_id", packet.UserID.String()),
 		zap.Uint32("ssrc", packet.SSRC),
@@ -417,17 +425,22 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 			zap.String("user_id", packet.UserID.String()))
 	}
 
-	s.sessionManager.UpdateActivity(session.GuildID)
-	s.sessionManager.UpdateAudioTime(session.GuildID)
+	// TODO: Currently not working
+	// if err := s.sessionManager.UpdateActivity(voiceSession.GuildID); err != nil {
+	// 	s.logger.Error("failed to update session activity", zap.Error(err))
+	// }
+	// if err := s.sessionManager.UpdateAudioTime(voiceSession.GuildID); err != nil {
+	// 	s.logger.Error("failed to update session audio time", zap.Error(err))
+	// }
 
 	// Update session ActiveUsers
-	session.mu.Lock()
-	session.ActiveUsers[packet.UserID] = &UserState{
+	voiceSession.mu.Lock()
+	voiceSession.ActiveUsers[packet.UserID] = &UserState{
 		UserID:       packet.UserID,
 		SSRC:         packet.SSRC,
 		LastActivity: time.Now(),
 	}
-	session.mu.Unlock()
+	voiceSession.mu.Unlock()
 
 	s.logger.Debug("Added audio to mixer",
 		zap.String("user_id", packet.UserID.String()),
@@ -435,7 +448,7 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 }
 
 // commitMixerAudio gets mixed audio from the mixer and sends it to OpenAI.
-func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
+func (s *Service) commitMixerAudio(ctx context.Context, voiceSession *VoiceSession) {
 	mixedAudio := s.audioMixer.Drain()
 
 	// Check if we got any audio
@@ -446,12 +459,12 @@ func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
 	}
 
 	// Update LastAudioTime
-	session.mu.Lock()
-	session.LastAudioTime = time.Now()
-	session.mu.Unlock()
+	voiceSession.mu.Lock()
+	voiceSession.LastAudioTime = time.Now()
+	voiceSession.mu.Unlock()
 
 	s.logger.Info("Committing mixer audio",
-		zap.String("guild_id", session.GuildID.String()),
+		zap.String("guild_id", voiceSession.GuildID.String()),
 		zap.Int("audio_bytes", len(mixedAudio)))
 
 	// // Use DetectSilence from audio processor to avoid sending silence
@@ -468,12 +481,12 @@ func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
 		zap.Duration("actual_duration", time.Duration(len(mixedAudio)/48000*1000)))
 
 	// Continue with the rest of the processing
-	s.processMixedAudio(ctx, session, mixedAudio)
+	s.processMixedAudio(ctx, voiceSession, mixedAudio)
 }
 
-func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, mixedAudio []int16) {
+func (s *Service) processMixedAudio(ctx context.Context, voiceSession *VoiceSession, mixedAudio []int16) {
 	s.logger.Info("Processing mixed audio",
-		zap.String("guild_id", session.GuildID.String()),
+		zap.String("guild_id", voiceSession.GuildID.String()),
 		zap.Int("size", len(mixedAudio)))
 
 	// DEBUG: Save audio to WAV files for debugging
@@ -481,7 +494,7 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 	const debugSaveWAV = true
 	if debugSaveWAV {
 		// Save the mixed audio
-		if err := s.saveDebugWAV(mixedAudio, 48000, session.GuildID, "mixed"); err != nil {
+		if err := s.saveDebugWAV(mixedAudio, 48000, voiceSession.GuildID, "mixed"); err != nil {
 			s.logger.Error("Failed to save mixed audio WAV", zap.Error(err))
 		}
 
@@ -535,21 +548,21 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 		zap.Int("base64_size", len(audioBase64)))
 }
 
-func (s *Service) handleAudioResponse(ctx context.Context, session *VoiceSession, audioData []byte) {
+func (s *Service) handleAudioResponse(ctx context.Context, voiceSession *VoiceSession, audioData []byte) {
 	s.logger.Debug("Received audio chunk from OpenAI",
 		zap.Int("pcm_size", len(audioData)))
 
 	// Queue audio data for sequential playback to avoid interference
-	s.queueAudioForPlayback(ctx, session, audioData)
+	s.queueAudioForPlayback(ctx, voiceSession, audioData)
 }
 
-func (s *Service) queueAudioForPlayback(ctx context.Context, session *VoiceSession, audioData []byte) {
+func (s *Service) queueAudioForPlayback(ctx context.Context, voiceSession *VoiceSession, audioData []byte) {
 	// Send audio data to the queue
 	select {
-	case session.AudioQueue <- audioData:
+	case voiceSession.AudioQueue <- audioData:
 		s.logger.Debug("Queued audio chunk",
 			zap.Int("pcm_size", len(audioData)),
-			zap.Int("queue_length", len(session.AudioQueue)))
+			zap.Int("queue_length", len(voiceSession.AudioQueue)))
 	case <-ctx.Done():
 		return
 	default:
@@ -558,19 +571,19 @@ func (s *Service) queueAudioForPlayback(ctx context.Context, session *VoiceSessi
 	}
 
 	// Start playback worker if not already running
-	session.PlaybackMutex.Lock()
-	if !session.PlaybackActive {
-		session.PlaybackActive = true
-		go s.audioPlaybackWorker(ctx, session)
+	voiceSession.PlaybackMutex.Lock()
+	if !voiceSession.PlaybackActive {
+		voiceSession.PlaybackActive = true
+		go s.audioPlaybackWorker(ctx, voiceSession)
 	}
-	session.PlaybackMutex.Unlock()
+	voiceSession.PlaybackMutex.Unlock()
 }
 
-func (s *Service) audioPlaybackWorker(ctx context.Context, session *VoiceSession) {
+func (s *Service) audioPlaybackWorker(ctx context.Context, voiceSession *VoiceSession) {
 	defer func() {
-		session.PlaybackMutex.Lock()
-		session.PlaybackActive = false
-		session.PlaybackMutex.Unlock()
+		voiceSession.PlaybackMutex.Lock()
+		voiceSession.PlaybackActive = false
+		voiceSession.PlaybackMutex.Unlock()
 		s.logger.Debug("Audio playback worker stopped")
 	}()
 
@@ -578,19 +591,19 @@ func (s *Service) audioPlaybackWorker(ctx context.Context, session *VoiceSession
 
 	for {
 		select {
-		case audioData, ok := <-session.AudioQueue:
+		case audioData, ok := <-voiceSession.AudioQueue:
 			if !ok {
 				return
 			}
 			// Process this audio chunk sequentially
-			s.splitAndPlayAudio(ctx, session, audioData)
+			s.splitAndPlayAudio(ctx, voiceSession, audioData)
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, audioData []byte) {
+func (s *Service) splitAndPlayAudio(ctx context.Context, voiceSession *VoiceSession, audioData []byte) {
 	// Discord expects 20ms Opus frames at 48kHz stereo sent at precise 20ms intervals
 	// Critical: Frame timing must be exact to prevent audio artifacts
 
@@ -663,7 +676,7 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 
 		// Send frame to Discord at the precise expected time
 		sendStartTime := time.Now()
-		err = s.voiceManager.PlayAudio(ctx, session.ChannelID, opusData)
+		err = s.voiceManager.PlayAudio(ctx, voiceSession.ChannelID, opusData)
 		if err != nil {
 			s.logger.Error("Failed to send audio frame to Discord",
 				zap.Error(err),
@@ -701,125 +714,127 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 		zap.Duration("total_elapsed", time.Since(frameStartTime)))
 }
 
-func (s *Service) handleTranscript(session *VoiceSession, transcript string) {
+func (s *Service) handleTranscript(voiceSession *VoiceSession, transcript string) {
 	s.logger.Info("AI transcript",
-		zap.String("guild_id", session.GuildID.String()),
+		zap.String("guild_id", voiceSession.GuildID.String()),
 		zap.String("transcript", transcript))
 
 	// Optionally send transcript to text channel
 	// (This could be configured via a setting)
 }
 
-func (s *Service) handleUserTranscript(session *VoiceSession, transcript string) {
+func (s *Service) handleUserTranscript(voiceSession *VoiceSession, transcript string) {
 	s.logger.Info("User transcript",
-		zap.String("guild_id", session.GuildID.String()),
-		zap.String("user_id", session.InitiatorID.String()),
+		zap.String("guild_id", voiceSession.GuildID.String()),
+		zap.String("user_id", voiceSession.InitiatorID.String()),
 		zap.String("transcript", transcript))
 
 	// Optionally send user transcript to text channel
 	// (This could be configured via a setting)
 }
 
-func (s *Service) handleResponseDone(ctx context.Context, session *VoiceSession, usage *Usage) {
+func (s *Service) handleResponseDone(ctx context.Context, voiceSession *VoiceSession, usage *Usage) {
 	if usage == nil {
 		return
 	}
 
 	// Check if session still exists in activeSessions
-	if _, exists := s.activeSessions.Load(session.GuildID); !exists {
+	if _, exists := s.activeSessions.Load(voiceSession.GuildID); !exists {
 		s.logger.Debug("Session no longer active, skipping response processing",
-			zap.String("guild_id", session.GuildID.String()))
+			zap.String("guild_id", voiceSession.GuildID.String()))
 
 		return
 	}
 
 	// Update token usage
-	err := s.sessionManager.UpdateTokenUsage(session.GuildID, usage.InputAudioTokens, usage.OutputAudioTokens)
+	err := s.sessionManager.UpdateTokenUsage(voiceSession.GuildID, usage.InputAudioTokens, usage.OutputAudioTokens)
 	if err != nil {
 		s.logger.Debug("Failed to update token usage", zap.Error(err),
-			zap.String("guild_id", session.GuildID.String()))
+			zap.String("guild_id", voiceSession.GuildID.String()))
 
 		return // Session was likely cleaned up
 	}
 
 	// Calculate cost using pricing service
-	session.mu.Lock()
-	cost, err := s.pricingService.CalculateAudioTokenCost(session.Model, session.InputAudioTokens, session.OutputAudioTokens)
-	session.mu.Unlock()
+	voiceSession.mu.Lock()
+	cost, err := s.pricingService.CalculateAudioTokenCost(voiceSession.Model, voiceSession.InputAudioTokens, voiceSession.OutputAudioTokens)
+	voiceSession.mu.Unlock()
 
 	if err != nil {
 		s.logger.Error("Failed to calculate session cost", zap.Error(err))
 	} else {
 		// Update session cost
-		err = s.sessionManager.UpdateSessionCost(session.GuildID, cost)
+		err = s.sessionManager.UpdateSessionCost(voiceSession.GuildID, cost)
 		if err != nil {
 			s.logger.Debug("Failed to update session cost", zap.Error(err),
-				zap.String("guild_id", session.GuildID.String()))
+				zap.String("guild_id", voiceSession.GuildID.String()))
 
 			return // Session was likely cleaned up
 		}
 
 		// Check cost warnings and limits
-		s.checkCostLimits(ctx, session, cost)
+		s.checkCostLimits(ctx, voiceSession, cost)
 	}
 
 	s.logger.Debug("Response completed",
-		zap.String("guild_id", session.GuildID.String()),
+		zap.String("guild_id", voiceSession.GuildID.String()),
 		zap.Int("input_tokens", usage.InputAudioTokens),
 		zap.Int("output_tokens", usage.OutputAudioTokens),
 		zap.Float64("cost", cost))
 }
 
-func (s *Service) checkCostLimits(ctx context.Context, session *VoiceSession, cost float64) {
+func (s *Service) checkCostLimits(ctx context.Context, voiceSession *VoiceSession, cost float64) {
 	// Check if cost limit exceeded
 	if cost >= s.cfg.MaxCostPerSession {
 		s.logger.Warn("Cost limit exceeded, ending session",
-			zap.String("guild_id", session.GuildID.String()),
+			zap.String("guild_id", voiceSession.GuildID.String()),
 			zap.Float64("cost", cost),
 			zap.Float64("limit", s.cfg.MaxCostPerSession))
 
-		s.endSession(ctx, session, fmt.Sprintf("cost limit exceeded ($%.2f)", cost))
+		if err := s.endSession(ctx, voiceSession, fmt.Sprintf("cost limit exceeded ($%.2f)", cost)); err != nil {
+			s.logger.Error("failed to end session", zap.Error(err))
+		}
 
 		return
 	}
 
 	// Show cost updates if enabled
-	session.mu.Lock()
-	shouldUpdate := s.cfg.TrackSessionCosts && time.Since(session.LastCostUpdate) > 30*time.Second
+	voiceSession.mu.Lock()
+	shouldUpdate := s.cfg.TrackSessionCosts && time.Since(voiceSession.LastCostUpdate) > 30*time.Second
 	if shouldUpdate {
 		// TODO: Send cost update to text channel
 		s.logger.Info("Session cost update",
-			zap.String("guild_id", session.GuildID.String()),
+			zap.String("guild_id", voiceSession.GuildID.String()),
 			zap.Float64("cost", cost),
-			zap.Int("input_tokens", session.InputAudioTokens),
-			zap.Int("output_tokens", session.OutputAudioTokens))
+			zap.Int("input_tokens", voiceSession.InputAudioTokens),
+			zap.Int("output_tokens", voiceSession.OutputAudioTokens))
 
 		// Update the last cost update time so we don't spam logs
-		session.LastCostUpdate = time.Now()
+		voiceSession.LastCostUpdate = time.Now()
 	}
-	session.mu.Unlock()
+	voiceSession.mu.Unlock()
 }
 
-func (s *Service) endSession(ctx context.Context, session *VoiceSession, reason string) error {
+func (s *Service) endSession(ctx context.Context, voiceSession *VoiceSession, reason string) error {
 	// Prevent double-ending a session
-	session.mu.Lock()
-	if session.State == SessionStateEnding || session.State == SessionStateEnded {
-		session.mu.Unlock()
+	voiceSession.mu.Lock()
+	if voiceSession.State == SessionStateEnding || voiceSession.State == SessionStateEnded {
+		voiceSession.mu.Unlock()
 
 		return nil
 	}
-	session.State = SessionStateEnding
-	session.mu.Unlock()
+	voiceSession.State = SessionStateEnding
+	voiceSession.mu.Unlock()
 
 	// Cancel session context
-	if session.CancelFunc != nil {
-		session.CancelFunc()
+	if voiceSession.CancelFunc != nil {
+		voiceSession.CancelFunc()
 	}
 
 	// Close OpenAI connection
-	if session.Connection != nil {
+	if voiceSession.Connection != nil {
 		// Try to close the connection if it implements io.Closer
-		if closer, ok := session.Connection.(interface{ Close() error }); ok {
+		if closer, ok := voiceSession.Connection.(interface{ Close() error }); ok {
 			if err := closer.Close(); err != nil {
 				s.logger.Warn("Failed to close OpenAI connection", zap.Error(err))
 			} else {
@@ -829,31 +844,31 @@ func (s *Service) endSession(ctx context.Context, session *VoiceSession, reason 
 	}
 
 	// Close audio queue to signal workers to stop
-	close(session.AudioQueue)
+	close(voiceSession.AudioQueue)
 
 	// Leave voice channel
-	err := s.voiceManager.LeaveChannel(ctx, session.ChannelID)
+	err := s.voiceManager.LeaveChannel(ctx, voiceSession.ChannelID)
 	if err != nil {
 		s.logger.Warn("Failed to leave voice channel", zap.Error(err))
 	}
 
 	// Remove from active sessions
-	s.activeSessions.Delete(session.GuildID)
+	s.activeSessions.Delete(voiceSession.GuildID)
 
 	// Remove from session manager as well
-	err = s.sessionManager.EndSession(session.GuildID)
+	err = s.sessionManager.EndSession(voiceSession.GuildID)
 	if err != nil {
 		s.logger.Warn("Failed to end session in session manager", zap.Error(err))
 	}
 
-	session.mu.Lock()
-	session.State = SessionStateEnded
-	session.mu.Unlock()
+	voiceSession.mu.Lock()
+	voiceSession.State = SessionStateEnded
+	voiceSession.mu.Unlock()
 
 	s.logger.Info("Voice session ended",
-		zap.String("guild_id", session.GuildID.String()),
+		zap.String("guild_id", voiceSession.GuildID.String()),
 		zap.String("reason", reason),
-		zap.Float64("cost", session.SessionCost))
+		zap.Float64("cost", voiceSession.SessionCost))
 
 	return nil
 }
@@ -866,43 +881,49 @@ func (s *Service) runWatchdog(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			s.activeSessions.Range(func(key, value any) bool {
-				session := value.(*VoiceSession)
+				voiceSession := value.(*VoiceSession)
 
-				session.mu.Lock()
-				lastAudioTime := session.LastAudioTime
-				startTime := session.StartTime
-				sessionCost := session.SessionCost
+				voiceSession.mu.Lock()
+				lastAudioTime := voiceSession.LastAudioTime
+				startTime := voiceSession.StartTime
+				sessionCost := voiceSession.SessionCost
 
 				// Clean up stale ActiveUsers entries (users who haven't been seen for 30 seconds)
-				for userID, userState := range session.ActiveUsers {
+				for userID, userState := range voiceSession.ActiveUsers {
 					if time.Since(userState.LastActivity) > 30*time.Second {
-						delete(session.ActiveUsers, userID)
+						delete(voiceSession.ActiveUsers, userID)
 						s.logger.Debug("Removed stale user from ActiveUsers",
-							zap.String("guild_id", session.GuildID.String()),
+							zap.String("guild_id", voiceSession.GuildID.String()),
 							zap.String("user_id", userID.String()),
 							zap.Duration("inactive_duration", time.Since(userState.LastActivity)))
 					}
 				}
 
-				session.mu.Unlock()
+				voiceSession.mu.Unlock()
 
 				// Check inactivity timeout
 				if time.Since(lastAudioTime) > time.Duration(s.cfg.InactivityTimeout)*time.Second {
-					s.endSession(ctx, session, "inactivity timeout")
+					if err := s.endSession(ctx, voiceSession, "inactivity timeout"); err != nil {
+						s.logger.Error("failed to end session", zap.Error(err))
+					}
 
 					return true
 				}
 
 				// Check session duration
 				if time.Since(startTime) > time.Duration(s.cfg.MaxSessionLength)*time.Minute {
-					s.endSession(ctx, session, "maximum session length reached")
+					if err := s.endSession(ctx, voiceSession, "maximum session length reached"); err != nil {
+						s.logger.Error("failed to end session", zap.Error(err))
+					}
 
 					return true
 				}
 
 				// Check cost limit
 				if sessionCost >= s.cfg.MaxCostPerSession {
-					s.endSession(ctx, session, fmt.Sprintf("cost limit reached ($%.2f)", sessionCost))
+					if err := s.endSession(ctx, voiceSession, fmt.Sprintf("cost limit reached ($%.2f)", sessionCost)); err != nil {
+						s.logger.Error("failed to end session", zap.Error(err))
+					}
 
 					return true
 				}
@@ -923,8 +944,10 @@ func (s *Service) Shutdown(ctx context.Context) error {
 
 	// End all active sessions
 	s.activeSessions.Range(func(key, value any) bool {
-		session := value.(*VoiceSession)
-		s.endSession(ctx, session, "service shutdown")
+		voiceSession := value.(*VoiceSession)
+		if err := s.endSession(ctx, voiceSession, "service shutdown"); err != nil {
+			s.logger.Error("failed to end session during shutdown", zap.Error(err))
+		}
 
 		return true
 	})

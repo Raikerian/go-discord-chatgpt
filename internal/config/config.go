@@ -32,8 +32,6 @@ type VoiceConfig struct {
 	VoiceProfile string `yaml:"voice_profile"` // "shimmer", "alloy", "echo" (default: "shimmer")
 
 	// Audio Configuration
-	AudioQuality     string  `yaml:"audio_quality"`       // "low", "medium", "high" (default: "medium")
-	SampleRate       int     `yaml:"sample_rate"`         // Default: 24000 (required by OpenAI)
 	SilenceThreshold float32 `yaml:"silence_threshold"`   // Energy threshold for silence detection
 	SilenceDuration  int     `yaml:"silence_duration_ms"` // MS of silence before processing (default: 1500)
 

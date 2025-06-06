@@ -33,6 +33,7 @@ type AudioMixer interface {
 
 // --------------------------- implementation ---------------------------
 
+// TODO: make this configurable
 const samplesPerFrame = DiscordFrameSize // 20 ms of 48 kHz mono PCM
 
 // streamState keeps mapping between a Discord SSRC RTP clock and our shared

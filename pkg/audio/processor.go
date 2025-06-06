@@ -58,6 +58,7 @@ func NewAudioProcessor() (AudioProcessor, error) {
 	}
 
 	// Configure encoder settings optimized for speech
+	// TODO: make this configurable
 	opusEncoder.SetBitrate(48000)
 
 	processor := &audioProcessor{

@@ -399,8 +399,6 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 		zap.Uint32("rtp_timestamp", packet.RTPTimestamp),
 		zap.Uint16("sequence", packet.Sequence))
 
-	// Add PCM audio to mixer with adjusted RTP timing info
-	// s.audioMixer.AddUserAudioWithRTP(uint64(packet.UserID), pcm, adjustedRTP, packet.Sequence)
 	pcm, err := s.audioProcessor.OpusToPCM48(packet.Opus)
 	if err != nil {
 		s.logger.Error("Failed to convert Opus to PCM",
@@ -488,10 +486,15 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 		return
 	}
 
-	// TODO: downsample audio to 24kHz
+	downsampledAudio, err := s.audioProcessor.DownsamplePCM(mixedAudio, audio.DiscordSampleRate, audio.OpenAISampleRate)
+	if err != nil {
+		s.logger.Error("Failed to downsample audio", zap.Error(err))
+
+		return
+	}
 
 	// Convert PCM to base64 for OpenAI
-	audioBase64, err := s.audioProcessor.PCMToBase64(audio.PCMInt16ToLE(mixedAudio))
+	audioBase64, err := s.audioProcessor.PCMToBase64(audio.PCMInt16ToLE(downsampledAudio))
 	if err != nil {
 		s.logger.Error("Failed to convert PCM to base64", zap.Error(err))
 

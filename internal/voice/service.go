@@ -361,7 +361,7 @@ func (s *Service) setupAudioHandlers(ctx context.Context, session *VoiceSession)
 
 func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audioChannel <-chan *AudioPacket) {
 	// Use a debouncer for clean timeout handling
-	const timeoutDuration = 200 * time.Millisecond
+	timeoutDuration := time.Duration(s.cfg.SilenceDuration) * time.Millisecond
 	debouncer := util.NewDebouncer(timeoutDuration)
 	defer debouncer.Stop()
 
@@ -399,25 +399,6 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 		zap.Uint32("rtp_timestamp", packet.RTPTimestamp),
 		zap.Uint16("sequence", packet.Sequence))
 
-	// pcm, err := s.audioProcessor.OpusToPCM(packet.Opus)
-	// if err != nil {
-	// 	s.logger.Debug("Failed to convert Opus to PCM",
-	// 		zap.Error(err),
-	// 		zap.String("user_id", packet.UserID.String()))
-
-	// 	return
-	// }
-
-	// // Scale RTP timestamp to match PCM sample rate after Opus→PCM conversion
-	// // Discord RTP timestamps are at 48kHz, but we process 24kHz PCM after conversion
-	// adjustedRTP := packet.RTPTimestamp / 2 // 48kHz → 24kHz scaling
-
-	// s.logger.Debug("RTP timestamp scaling applied",
-	// 	zap.String("user_id", packet.UserID.String()),
-	// 	zap.Uint32("original_rtp", packet.RTPTimestamp),
-	// 	zap.Uint32("scaled_rtp", adjustedRTP),
-	// 	zap.Int("pcm_size", len(pcm)))
-
 	// Add PCM audio to mixer with adjusted RTP timing info
 	// s.audioMixer.AddUserAudioWithRTP(uint64(packet.UserID), pcm, adjustedRTP, packet.Sequence)
 	pcm, err := s.audioProcessor.OpusToPCM48(packet.Opus)
@@ -450,20 +431,11 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 
 	s.logger.Debug("Added audio to mixer",
 		zap.String("user_id", packet.UserID.String()),
-		// zap.Int("pcm_length", len(pcm)),
 		zap.Uint32("rtp_timestamp", packet.RTPTimestamp))
 }
 
 // commitMixerAudio gets mixed audio from the mixer and sends it to OpenAI.
 func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
-	// Get all available audio and immediately flush buffers
-	// This atomic operation ensures we don't miss any audio or leave stale data
-	// mixedAudio, actualDuration, err := s.audioMixer.GetAllAvailableMixedAudioAndFlush()
-	// if err != nil {
-	// 	s.logger.Error("Failed to mix audio", zap.Error(err))
-
-	// 	return
-	// }
 	mixedAudio := s.audioMixer.Drain()
 
 	// Check if we got any audio
@@ -495,13 +467,6 @@ func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
 		// zap.Float32("energy_level", energyLevel),
 		zap.Duration("actual_duration", time.Duration(len(mixedAudio)/48000*1000)))
 
-	// downsampledAudio, err := s.audioProcessor.DownsamplePCM(mixedAudio, 48000, 24000)
-	// if err != nil {
-	// 	s.logger.Error("Failed to downsample audio", zap.Error(err))
-
-	// 	return
-	// }
-
 	// Continue with the rest of the processing
 	s.processMixedAudio(ctx, session, mixedAudio)
 }
@@ -522,6 +487,8 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 
 		return
 	}
+
+	// TODO: downsample audio to 24kHz
 
 	// Convert PCM to base64 for OpenAI
 	audioBase64, err := s.audioProcessor.PCMToBase64(audio.PCMInt16ToLE(mixedAudio))

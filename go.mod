@@ -6,7 +6,6 @@ require (
 	github.com/WqyJh/go-openai-realtime v0.5.0
 	github.com/diamondburned/arikawa/v3 v3.5.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/mjibson/go-dsp v0.0.0-20180508042940-11479a337f12
 	github.com/sashabaranov/go-openai v1.40.1
 	github.com/stretchr/testify v1.10.0
 	go.uber.org/fx v1.24.0

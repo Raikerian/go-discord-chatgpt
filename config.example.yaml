@@ -56,13 +56,6 @@ voice:
   # Options: "shimmer", "alloy", "echo", "nova", "onyx"
   voice_profile: "shimmer"
   
-  # Audio quality setting
-  # Options: "low", "medium", "high"
-  audio_quality: "medium"
-  
-  # Sample rate for audio processing (required by OpenAI)
-  sample_rate: 24000
-  
   # Energy threshold for silence detection (0.0 to 1.0)
   silence_threshold: 0.01
   

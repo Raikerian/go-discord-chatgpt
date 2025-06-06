@@ -7,8 +7,6 @@ import (
 	"sync"
 
 	"layeh.com/gopus"
-
-	"go.uber.org/zap"
 )
 
 // AudioProcessor converts between Discord Opus and the 24-kHz mono
@@ -36,7 +34,6 @@ type AudioProcessor interface {
 }
 
 type audioProcessor struct {
-	logger *zap.Logger
 	closed bool
 
 	// Opus codecs
@@ -47,7 +44,7 @@ type audioProcessor struct {
 	mu sync.RWMutex
 }
 
-func NewAudioProcessor(logger *zap.Logger) (AudioProcessor, error) {
+func NewAudioProcessor() (AudioProcessor, error) {
 	// Initialize Opus decoder for Discord -> PCM
 	opusDecoder, err := gopus.NewDecoder(DiscordSampleRate, DiscordChannels)
 	if err != nil {
@@ -64,13 +61,9 @@ func NewAudioProcessor(logger *zap.Logger) (AudioProcessor, error) {
 	opusEncoder.SetBitrate(48000)
 
 	processor := &audioProcessor{
-		logger:      logger,
 		opusDecoder: opusDecoder,
 		opusEncoder: opusEncoder,
 	}
-
-	logger.Info("Audio processor initialized",
-		zap.Int("bitrate", 48000))
 
 	return processor, nil
 }

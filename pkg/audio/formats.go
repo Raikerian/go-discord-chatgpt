@@ -1,3 +1,4 @@
+// Package audio provides audio processing utilities for Discord voice applications.
 package audio
 
 // Format constants shared by the codec and mixer layers.

@@ -2,16 +2,13 @@ package voice
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/Raikerian/go-discord-chatgpt/internal/config"
-	"github.com/Raikerian/go-discord-chatgpt/pkg/audiomixer"
+	"github.com/Raikerian/go-discord-chatgpt/pkg/audio"
 	"github.com/Raikerian/go-discord-chatgpt/pkg/openai"
 
 	"github.com/diamondburned/arikawa/v3/discord"
@@ -26,10 +23,10 @@ type Service struct {
 	pricingService openai.PricingService
 
 	voiceManager     DiscordManager
-	audioProcessor   AudioProcessor
+	audioProcessor   audio.AudioProcessor
 	realtimeProvider RealtimeProvider
 	sessionManager   SessionManager
-	audioMixer       audiomixer.AudioMixer
+	audioMixer       audio.AudioMixer
 
 	// activeSessions stores currently active voice sessions by guild ID
 	activeSessions sync.Map // map[discord.GuildID]*VoiceSession
@@ -100,10 +97,10 @@ func NewService(
 	session *session.Session,
 	pricingService openai.PricingService,
 	voiceManager DiscordManager,
-	audioProcessor AudioProcessor,
+	audioProcessor audio.AudioProcessor,
 	realtimeProvider RealtimeProvider,
 	sessionManager SessionManager,
-	audioMixer audiomixer.AudioMixer,
+	audioMixer audio.AudioMixer,
 ) *Service {
 	// Convert slices to maps for O(1) lookups
 	allowedUsersMap := make(map[string]struct{}, len(cfg.Voice.AllowedUserIDs))
@@ -411,27 +408,43 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 		zap.Uint32("rtp_timestamp", packet.RTPTimestamp),
 		zap.Uint16("sequence", packet.Sequence))
 
-	pcm, err := s.audioProcessor.OpusToPCM(packet.Opus)
+	// pcm, err := s.audioProcessor.OpusToPCM(packet.Opus)
+	// if err != nil {
+	// 	s.logger.Debug("Failed to convert Opus to PCM",
+	// 		zap.Error(err),
+	// 		zap.String("user_id", packet.UserID.String()))
+
+	// 	return
+	// }
+
+	// // Scale RTP timestamp to match PCM sample rate after Opus→PCM conversion
+	// // Discord RTP timestamps are at 48kHz, but we process 24kHz PCM after conversion
+	// adjustedRTP := packet.RTPTimestamp / 2 // 48kHz → 24kHz scaling
+
+	// s.logger.Debug("RTP timestamp scaling applied",
+	// 	zap.String("user_id", packet.UserID.String()),
+	// 	zap.Uint32("original_rtp", packet.RTPTimestamp),
+	// 	zap.Uint32("scaled_rtp", adjustedRTP),
+	// 	zap.Int("pcm_size", len(pcm)))
+
+	// Add PCM audio to mixer with adjusted RTP timing info
+	// s.audioMixer.AddUserAudioWithRTP(uint64(packet.UserID), pcm, adjustedRTP, packet.Sequence)
+	pcm, err := s.audioProcessor.OpusToPCM48(packet.Opus)
 	if err != nil {
-		s.logger.Debug("Failed to convert Opus to PCM",
+		s.logger.Error("Failed to convert Opus to PCM",
 			zap.Error(err),
 			zap.String("user_id", packet.UserID.String()))
 
 		return
 	}
 
-	// Scale RTP timestamp to match PCM sample rate after Opus→PCM conversion
-	// Discord RTP timestamps are at 48kHz, but we process 24kHz PCM after conversion
-	adjustedRTP := packet.RTPTimestamp / 2 // 48kHz → 24kHz scaling
+	err = s.audioMixer.AddFrame(packet.SSRC, packet.RTPTimestamp, pcm)
+	if err != nil {
+		s.logger.Warn("Failed to push frame to mixer",
+			zap.Error(err),
+			zap.String("user_id", packet.UserID.String()))
+	}
 
-	s.logger.Debug("RTP timestamp scaling applied",
-		zap.String("user_id", packet.UserID.String()),
-		zap.Uint32("original_rtp", packet.RTPTimestamp),
-		zap.Uint32("scaled_rtp", adjustedRTP),
-		zap.Int("pcm_size", len(pcm)))
-
-	// Add PCM audio to mixer with adjusted RTP timing info
-	s.audioMixer.AddUserAudioWithRTP(uint64(packet.UserID), pcm, adjustedRTP, packet.Sequence)
 	s.sessionManager.UpdateActivity(session.GuildID)
 	s.sessionManager.UpdateAudioTime(session.GuildID)
 
@@ -446,7 +459,7 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 
 	s.logger.Debug("Added audio to mixer",
 		zap.String("user_id", packet.UserID.String()),
-		zap.Int("pcm_length", len(pcm)),
+		// zap.Int("pcm_length", len(pcm)),
 		zap.Uint32("rtp_timestamp", packet.RTPTimestamp))
 }
 
@@ -454,15 +467,16 @@ func (s *Service) processAudioPacket(session *VoiceSession, packet *AudioPacket)
 func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
 	// Get all available audio and immediately flush buffers
 	// This atomic operation ensures we don't miss any audio or leave stale data
-	mixedAudio, actualDuration, err := s.audioMixer.GetAllAvailableMixedAudioAndFlush()
-	if err != nil {
-		s.logger.Error("Failed to mix audio", zap.Error(err))
+	// mixedAudio, actualDuration, err := s.audioMixer.GetAllAvailableMixedAudioAndFlush()
+	// if err != nil {
+	// 	s.logger.Error("Failed to mix audio", zap.Error(err))
 
-		return
-	}
+	// 	return
+	// }
+	mixedAudio := s.audioMixer.Drain()
 
 	// Check if we got any audio
-	if len(mixedAudio) == 0 || actualDuration == 0 {
+	if len(mixedAudio) == 0 {
 		s.logger.Debug("No audio to commit")
 
 		return
@@ -475,7 +489,6 @@ func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
 
 	s.logger.Info("Committing mixer audio",
 		zap.String("guild_id", session.GuildID.String()),
-		zap.Duration("actual_duration", actualDuration),
 		zap.Int("audio_bytes", len(mixedAudio)))
 
 	// // Use DetectSilence from audio processor to avoid sending silence
@@ -489,13 +502,20 @@ func (s *Service) commitMixerAudio(ctx context.Context, session *VoiceSession) {
 	s.logger.Debug("Mixed audio obtained",
 		zap.Int("size", len(mixedAudio)),
 		// zap.Float32("energy_level", energyLevel),
-		zap.Duration("actual_duration", actualDuration))
+		zap.Duration("actual_duration", time.Duration(len(mixedAudio)/48000*1000)))
+
+	// downsampledAudio, err := s.audioProcessor.DownsamplePCM(mixedAudio, 48000, 24000)
+	// if err != nil {
+	// 	s.logger.Error("Failed to downsample audio", zap.Error(err))
+
+	// 	return
+	// }
 
 	// Continue with the rest of the processing
 	s.processMixedAudio(ctx, session, mixedAudio)
 }
 
-func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, mixedAudio []byte) {
+func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, mixedAudio []int16) {
 	s.logger.Info("Processing mixed audio",
 		zap.String("guild_id", session.GuildID.String()),
 		zap.Int("size", len(mixedAudio)))
@@ -505,7 +525,7 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 	const debugSaveWAV = true
 	if debugSaveWAV {
 		// Save the mixed audio
-		if err := s.saveDebugWAV(mixedAudio, session.GuildID, "mixed"); err != nil {
+		if err := s.saveDebugWAV(mixedAudio, 48000, session.GuildID, "mixed"); err != nil {
 			s.logger.Error("Failed to save mixed audio WAV", zap.Error(err))
 		}
 
@@ -513,7 +533,7 @@ func (s *Service) processMixedAudio(ctx context.Context, session *VoiceSession, 
 	}
 
 	// Convert PCM to base64 for OpenAI
-	audioBase64, err := s.audioProcessor.PCMToBase64(mixedAudio)
+	audioBase64, err := s.audioProcessor.PCMToBase64(audio.PCMInt16ToLE(mixedAudio))
 	if err != nil {
 		s.logger.Error("Failed to convert PCM to base64", zap.Error(err))
 
@@ -612,8 +632,8 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 	// Critical: Frame timing must be exact to prevent audio artifacts
 
 	// 20ms at 24kHz mono = 480 samples = 960 bytes (16-bit PCM)
-	const frameSizeBytes = OpenAIFrameSize * 2 // 20ms at 24kHz mono in bytes (16-bit samples)
-	const frameDurationMs = 20                 // Each frame represents 20ms of audio
+	const frameSizeBytes = audio.OpenAIFrameSize * 2 // 20ms at 24kHz mono in bytes (16-bit samples)
+	const frameDurationMs = 20                       // Each frame represents 20ms of audio
 
 	frameIndex := 0
 	frameStartTime := time.Now()
@@ -646,7 +666,7 @@ func (s *Service) splitAndPlayAudio(ctx context.Context, session *VoiceSession, 
 		}
 
 		// Convert this 20ms PCM frame to Opus for Discord
-		opusData, err := s.audioProcessor.PCMToOpus(frameData)
+		opusData, err := s.audioProcessor.PCM48MonoToOpus(audio.LEToPCMInt16(frameData))
 		if err != nil {
 			s.logger.Error("Failed to convert PCM frame to Opus",
 				zap.Error(err),
@@ -945,66 +965,6 @@ func (s *Service) Shutdown(ctx context.Context) error {
 
 		return true
 	})
-
-	return nil
-}
-
-// saveDebugWAV saves PCM audio as a WAV file for debugging.
-func (s *Service) saveDebugWAV(pcmData []byte, guildID discord.GuildID, prefix string) error {
-	// Create debug directory if it doesn't exist
-	debugDir := "debug_audio"
-	if err := os.MkdirAll(debugDir, 0755); err != nil {
-		return fmt.Errorf("failed to create debug directory: %w", err)
-	}
-
-	// Generate filename with timestamp
-	timestamp := time.Now().Format("20060102_150405")
-	filename := filepath.Join(debugDir, fmt.Sprintf("%s_audio_%s_%s.wav", prefix, guildID.String(), timestamp))
-
-	// Create WAV file
-	file, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("failed to create WAV file: %w", err)
-	}
-	defer file.Close()
-
-	// WAV file format: 24kHz, mono, 16-bit PCM
-	const (
-		numChannels   = 1
-		sampleRate    = 24000
-		bitsPerSample = 16
-		byteRate      = sampleRate * numChannels * bitsPerSample / 8
-		blockAlign    = numChannels * bitsPerSample / 8
-	)
-
-	// Calculate sizes
-	dataSize := uint32(len(pcmData))
-	fileSize := dataSize + 36 // 36 = header size without data chunk size
-
-	// Write RIFF header
-	file.WriteString("RIFF")
-	binary.Write(file, binary.LittleEndian, fileSize)
-	file.WriteString("WAVE")
-
-	// Write fmt chunk
-	file.WriteString("fmt ")
-	binary.Write(file, binary.LittleEndian, uint32(16)) // fmt chunk size
-	binary.Write(file, binary.LittleEndian, uint16(1))  // PCM format
-	binary.Write(file, binary.LittleEndian, uint16(numChannels))
-	binary.Write(file, binary.LittleEndian, uint32(sampleRate))
-	binary.Write(file, binary.LittleEndian, uint32(byteRate))
-	binary.Write(file, binary.LittleEndian, uint16(blockAlign))
-	binary.Write(file, binary.LittleEndian, uint16(bitsPerSample))
-
-	// Write data chunk
-	file.WriteString("data")
-	binary.Write(file, binary.LittleEndian, dataSize)
-	file.Write(pcmData)
-
-	s.logger.Info("Saved debug WAV file",
-		zap.String("filename", filename),
-		zap.Int("size_bytes", len(pcmData)),
-		zap.Float64("duration_seconds", float64(len(pcmData))/float64(byteRate)))
 
 	return nil
 }

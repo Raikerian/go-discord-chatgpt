@@ -104,6 +104,7 @@ func (p *audioProcessor) PCM48MonoToOpus(pcm48 []int16) ([]byte, error) {
 	if p.closed {
 		return nil, errors.New("processor closed")
 	}
+
 	return p.opusEncoder.Encode(stereo, DiscordFrameSize, 0)
 }
 
@@ -119,6 +120,7 @@ func (p *audioProcessor) DownsamplePCM(src []int16, srcRate, dstRate int) ([]int
 	for i := 0; i < len(src); i += factor {
 		dst = append(dst, src[i]) // naive decimation
 	}
+
 	return dst, nil
 }
 
@@ -138,6 +140,7 @@ func (p *audioProcessor) UpsamplePCM(src []int16, srcRate, dstRate int) ([]int16
 			dst[i*factor+k] = v // zero-order hold
 		}
 	}
+
 	return dst, nil
 }
 
@@ -147,6 +150,7 @@ func (p *audioProcessor) PCMToBase64(pcm []byte) (string, error) {
 	if len(pcm) == 0 {
 		return "", errors.New("pcm empty")
 	}
+
 	return base64.StdEncoding.EncodeToString(pcm), nil
 }
 
@@ -161,5 +165,6 @@ func (p *audioProcessor) Base64ToPCM(b64 string) ([]byte, error) {
 	if err := validateOpenAIPCM(pcm); err != nil {
 		return nil, err
 	}
+
 	return pcm, nil
 }

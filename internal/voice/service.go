@@ -374,6 +374,7 @@ func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audio
 		case packet, ok := <-audioChannel:
 			if !ok || packet == nil {
 				s.logger.Debug("Audio channel closed, exiting processAudio")
+
 				return
 			}
 
@@ -386,6 +387,7 @@ func (s *Service) runAudioLoop(ctx context.Context, session *VoiceSession, audio
 
 		case <-ctx.Done():
 			s.endSession(ctx, session, "context canceled")
+
 			return
 		}
 	}

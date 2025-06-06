@@ -8,18 +8,18 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/Raikerian/go-discord-chatgpt/pkg/audio"
 	"github.com/diamondburned/arikawa/v3/discord"
 	"go.uber.org/zap"
+
+	"github.com/Raikerian/go-discord-chatgpt/pkg/audio"
 )
 
 // saveDebugWAV writes a mono 16-bit PCM buffer to disk as a WAV file.
 // samples     – raw PCM samples BEFORE down-sampling (e.g. 48 kHz, mono)
 // sampleRate  – Hz of the samples slice (48 000 for Discord frames)
-// prefix      – filename prefix (e.g. "mixed" or "user123")
+// prefix      – filename prefix (e.g. "mixed" or "user123").
 func (s *Service) saveDebugWAV(samples []int16, sampleRate int,
 	guildID discord.GuildID, prefix string) error {
-
 	if len(samples) == 0 {
 		return errors.New("saveDebugWAV: empty sample slice")
 	}

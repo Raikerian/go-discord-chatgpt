@@ -9,6 +9,7 @@ import (
 func PCMInt16ToLE(samples []int16) []byte {
 	var buf bytes.Buffer
 	_ = binary.Write(&buf, binary.LittleEndian, samples)
+
 	return buf.Bytes()
 }
 
@@ -16,5 +17,6 @@ func PCMInt16ToLE(samples []int16) []byte {
 func LEToPCMInt16(b []byte) []int16 {
 	out := make([]int16, len(b)/2)
 	_ = binary.Read(bytes.NewReader(b), binary.LittleEndian, &out)
+
 	return out
 }

@@ -33,7 +33,7 @@ type AudioMixer interface {
 
 // --------------------------- implementation ---------------------------
 
-// TODO: make this configurable
+// TODO: make this configurable.
 const samplesPerFrame = DiscordFrameSize // 20 ms of 48 kHz mono PCM
 
 // streamState keeps mapping between a Discord SSRC RTP clock and our shared
@@ -85,7 +85,7 @@ func (m *mixer) AddFrame(ssrc, ts uint32, pcm []int16) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 1. Initialise stream state if this is the first packet for the SSRC.
+	// 1. Initialize stream state if this is the first packet for the SSRC.
 	st, ok := m.streams[ssrc]
 	if !ok {
 		st = &streamState{
@@ -144,6 +144,7 @@ func (m *mixer) Drain() []int16 {
 	// new speakers anchor themselves relative to a fresh timeline.
 	m.buffer = nil
 	m.streams = make(map[uint32]*streamState)
+
 	return out
 }
 
@@ -173,6 +174,7 @@ func (m *mixer) copyBuffer() []int16 {
 	for i, v := range m.buffer {
 		mixed[i] = saturateInt16(v)
 	}
+
 	return mixed
 }
 
@@ -184,5 +186,6 @@ func saturateInt16(v int32) int16 {
 	if v < -32768 {
 		return -32768
 	}
+
 	return int16(v)
 }

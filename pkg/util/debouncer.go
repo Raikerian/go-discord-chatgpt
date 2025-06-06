@@ -29,7 +29,7 @@ type Debouncer struct {
 	stopped  bool
 }
 
-// NewDebouncer creates a new debouncer with the specified duration
+// NewDebouncer creates a new debouncer with the specified duration.
 func NewDebouncer(duration time.Duration) *Debouncer {
 	return &Debouncer{
 		duration: duration,
@@ -57,7 +57,7 @@ func (d *Debouncer) Reset() {
 	d.timer.Reset(d.duration)
 }
 
-// C returns the timer's channel
+// C returns the timer's channel.
 func (d *Debouncer) C() <-chan time.Time {
 	return d.timer.C
 }
